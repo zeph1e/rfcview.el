@@ -1,0 +1,5 @@
+(:name rfcview
+       :description "Yet another Emacs RFC viewer."
+       :website "https://github.com/zeph1e/rfcview.el"
+       :type github
+       :pkgname "zeph1e/rfcview.el")

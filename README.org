@@ -1,0 +1,39 @@
+* rfcview
+
+This elisp script, *rfcview* is an Emacs tool which helps to browse, to download, and to read RFC documents in Emacs. When you run *rfcview*, it will update RFC index if it is required.
+
+* Installation
+
+** el-get
+
+The recipe of this package is not yet in [[https://github.com/dimitri/el-get][el-get]] official repository, you should download and copy the recipe into your local directory which are added to *el-get-recipe-path*.
+
+Assume that you already added =~/.emacs.d/recipes/= into *el-get-recipe-path*:
+
+#+NAME: el-get recipe
+#+BEGIN_SRC sh
+$ wget https://raw.githubusercontent.com/zeph1e/rfcview.el/rfcview.rcp
+$ cp rfcview.rcp ~/.emacs.d/recipes/
+#+END_SRC
+
+And then add a following line into your emacs init script:
+
+#+NAME: el-get bundle
+#+BEGIN_SRC emacs-lisp
+(el-get-bundle rfcview)
+#+END_SRC
+
+** Manual
+
+Just download and add following lines into your emacs init script:
+
+#+NAME: manual autolaod
+#+BEGIN_SRC emacs-lisp
+;; if you placed rfcview.el into ~/.emacs.d/rfcview/
+(add-to-list 'load-path "~/.emacs.d/rfcview")
+(autoload 'rfcview "rfcview" t t)
+#+END_SRC
+
+* License
+
+[[http://www.wtfpl.net][WTFPL version 2]]
