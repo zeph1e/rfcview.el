@@ -257,12 +257,12 @@
           (let* ((end (save-excursion (search-forward-regexp "^$" nil t)))
                  (number (string-to-number (buffer-substring (point-at-bol) (point))))
                  (title (replace-regexp-in-string
-                         "\\(\n\\|\r\\| \\)+" " "
-                         (buffer-substring (point) (search-forward "." end t))))
+                         "\\s-+" " "
+                         (buffer-substring (point) (search-forward-regexp "\\.\\s-+" end t))))
                  (authors (let (result candidate)
                             (dolist (auth (split-string
                                            (replace-regexp-in-string
-                                            "\\(\n\\|\r\\| \\)+" " "
+                                            "\\s-+" " "
                                             (buffer-substring (progn
                                                                 (skip-chars-forward " \r\n")
                                                                 (point))
@@ -282,16 +282,16 @@
                                          (push candidate result)
                                        result))))
                  (date (replace-regexp-in-string
-                        "\\(\n\\|\r\\| \\)+" " "
-                        (buffer-substring (search-forward-regexp "\\(\n\\|\\r\\| \\)+" end t)
+                        "\\s-+" " "
+                        (buffer-substring (search-forward-regexp "\\s-+" end t)
                                           (search-forward-regexp
                                            (concat rfcview:month-name-pattern
                                                    " \\([0-9]\\{4\\}\\)") end t))))
-                 (trait-begin (search-forward-regexp "\\(\n\\|\\r\\| \\)+" end t))
-                 (traits '((obsoletes . "Obsoletes\\(\n\\|\r\\| \\)+")
-                           (obeoleted-by . "Obsoleted\\(\n\\|\r\\| \\)+by\\(\n\\|\r\\| \\)+")
-                           (updates . "Updates\\(\n\\|\r\\| \\)+")
-                           (updated-by . "Updated\\(\n\\|\r\\| \\)+by\\(\n\\|\r\\| \\)+")))
+                 (trait-begin (search-forward-regexp "\\s-+" end t))
+                 (traits '((obsoletes . "Obsoletes\\s-+")
+                           (obeoleted-by . "Obsoleted\\s-+by\\s-+")
+                           (updates . "Updates\\s-+")
+                           (updated-by . "Updated\\s-+by\\s-+")))
                  obsoletes obsoleted-by updates updated-by)
 
             (dolist (trait traits)
@@ -300,10 +300,10 @@
                    (split-string
                     (if (search-forward-regexp (concat "(" (cdr trait)) end t)
                         (replace-regexp-in-string
-                         "\\(\n\\|\r\\| \\)+" " "
+                         "\\s-+" " "
                          (buffer-substring (point) (1- (search-forward ")" end t))))
                       "")
-                    ",\\(\n\\| \\)+")))
+                    ",\\s-+")))
             (push (list :number number
                         :title title
                         :authors authors
