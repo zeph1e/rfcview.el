@@ -196,6 +196,31 @@
   (when rfcview:use-debug
     (apply #'message format args)))
 
+(defun rfcview:wrap-text-at-word-boundary (text margin-width max-width)
+  "Wrap text at word boundary to fit in given width."
+  (let (phrase line offset word-len)
+    (if (< (length text) (- max-width margin-width))
+        text
+      (setq offset margin-width)
+      (dolist (word (split-string text " " t))
+        (setq word-len (length word))
+        (if (< word-len (- max-width offset))
+            ;; possible to insert in the end of this line
+            (progn
+              (setq offset (+ offset word-len (if line 1 0)))
+              (push word line))
+          ;; need to wrap
+          (push line phrase)
+          (setq line (list word))
+          (setq offset (+ margin-width (length word)))))
+      (when line (push line phrase))
+      (mapconcat (lambda (l)
+                   (mapconcat (lambda (w) w)
+                              (reverse l)
+                              " "))
+                 (reverse phrase)
+                 (concat "\n" (make-string margin-width ?\s))))))
+
 (defun rfcview:make-entry-line (number title date authors obsoletes obsoleted-by updates updated-by)
   "Make a propertized line containing a single RFC document information."
   ;; line format:
@@ -204,36 +229,28 @@
   ;;       Author Name1, Author Name2                           August XXXX
   ;;       Obsoletes: [RFC00XX] [RFC00YY]
   ;;       Obsoleted by: [RFC0XXX]
-  (let ((width (- (window-body-width) 6))
-        (str (format "%04d  " number))
-        (margin "      ")
-        (traits (list (list :var obsoletes :text "Obsoletes")
-                      (list :var obsoleted-by :text "Obsoleted by")
-                      (list :var updates :text "Updates")
-                      (list :var updated-by :text "Updated by")))
-        line-beg beg end)
+  (let* ((body-width (window-body-width))
+         (margin-width 6)
+         (width (- (window-body-width) 6))
+         (str (format "%04d  " number))
+         (margin (make-string margin-width ?\s))
+         (traits (list (list :var obsoletes :text "Obsoletes")
+                       (list :var obsoleted-by :text "Obsoleted by")
+                       (list :var updates :text "Updates")
+                       (list :var updated-by :text "Updated by")))
+         line-beg beg end)
     (setq end (length str))
     (when rfcview:use-face
       (put-text-property 0 end 'face 'rfcview:rfc-number-face str))
 
     (setq beg end)
-    (if (<= (length title) (- width (length str)))
-        (setq str (concat str title)) ;; no need to wrap
-      (setq line-beg (length str))
-      (dolist (word (split-string title " " t))
-        (if (< (length word) (- width (- (length str) line-beg) 1))
-            (progn
-              (unless (= line-beg (length str))
-                (setq str (concat str " ")))
-              (setq str (concat str word)))
-          (setq str (concat str "\n" margin word))
-          (setq line-beg (- (length str) (length word))))))
+    (setq str (concat str (rfcview:wrap-text-at-word-boundary title margin-width body-width)))
     (setq end (length str))
     (setq str (concat str "\n" margin))
     (when rfcview:use-face
       (put-text-property beg end 'face 'rfcview:rfc-title-face str))
 
-    (let ((author-width (- width (length date) 2)))
+    (let ((author-width (- body-width margin-width (length date) 2)))
       (setq beg (length str))
       (setq str (concat str (format (format "%%-%ds  %%s\n" author-width)
                                     (truncate-string-to-width
@@ -244,30 +261,33 @@
       (when rfcview:use-face
         (put-text-property beg (- end (length date) 1) 'face 'rfcview:rfc-authors-face str)
         (setq beg (- end (length date) 1))
-        (put-text-property beg end 'face 'rfcview:rfc-date-face str))
-      )
+        (put-text-property beg end 'face 'rfcview:rfc-date-face str)))
+
     (setq beg (length str))
     (dolist (trait traits)
       (let ((var (plist-get trait :var))
             (text (plist-get trait :text)))
         (when (and trait var)
           (setq str (concat str margin (format "%s: " text)
-                            (mapconcat
-                             (lambda (s)
-                               (let* ((num (string-to-int
-                                            (if (string-match "\\`RFC\\([0-9]\\{4\\}\\)\\'" s)
-                                                (replace-match "\\1" t nil s) "")))
-                                      (rfc (gethash num (plist-get rfcview:rfc-cache :table)))
-                                      prop)
-                                 (when rfcview:use-face
-                                   (setq prop (plist-put prop 'mouse-face 'rfcview:mouse-face)))
-                                 (setq prop (plist-put prop 'help-echo
-                                                       (format "%s <%s>\n%s" s
-                                                               (plist-get rfc :date)
-                                                               (plist-get rfc :title))))
-                                 (add-text-properties 0 (length s) prop s)
-                                 (format "%s" s)
-                                 )) var " ")
+                            (rfcview:wrap-text-at-word-boundary
+                             (mapconcat
+                              (lambda (s)
+                                (let* ((num (string-to-int
+                                             (if (string-match "\\`RFC\\([0-9]\\{4\\}\\)\\'" s)
+                                                 (replace-match "\\1" t nil s) "")))
+                                       (rfc (gethash num (plist-get rfcview:rfc-cache :table)))
+                                       prop)
+                                  (when rfcview:use-face
+                                    (setq prop (plist-put prop 'mouse-face 'rfcview:mouse-face)))
+                                  (setq prop (plist-put prop 'help-echo
+                                                        (format "%s\t<%s>\n%s" s
+                                                                (plist-get rfc :date)
+                                                                (plist-get rfc :title))))
+                                  (add-text-properties 0 (length s) prop s)
+                                  (format "%s" s)
+                                  )) var " ")
+                             (+ margin-width (length text) 2)
+                             (- body-width 8))
                             "\n")))))
     (setq end (length str))
     (when (< beg end)
