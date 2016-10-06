@@ -50,8 +50,17 @@
   :type 'boolean
   :group 'rfcview)
 
+(defcustom rfcview:use-debug nil
+  "Whether to use debug output or not."
+  :type 'boolean
+  :group 'rfcview)
+
 (defface rfcview:rfc-number-face
-  '((((class color) (background dark))
+  '((((class color) (min-colors 88) (background dark))
+     (:foreground "gold"))
+    (((class color) (min-colors 88) (background light))
+     (:foreground "navy"))
+    (((class color) (background dark))
      (:foreground "yellow"))
     (((class color) (background light))
      (:foreground "blue"))
@@ -59,17 +68,38 @@
   "Face used to highlight RFC number in the *RFC INDEX* buffer."
   :group 'rfcview)
 
-(defface rfcview:rfc-authors-face
-  '((((class color) (background dark))
-     (:foreground "green"))
+(defface rfcview:rfc-title-face
+  '((((class color) (min-colors 88) (background dark))
+     (:foreground "gainsboro"))
+    (((class color) (min-colors 88) (background light))
+     (:foreground "dark gray"))
+    (((class color) (background dark))
+     (:foreground "white"))
     (((class color) (background light))
-     (:foreground "green"))
+     (:foreground "black"))
     (t (:bold t)))
   "Face used to highlight RFC title in the *RFC INDEX* buffer."
   :group 'rfcview)
 
+(defface rfcview:rfc-authors-face
+  '((((class color) (min-colors 88) (background dark))
+     (:foreground "forest green"))
+    (((class color) (min-colors 88) (background light))
+     (:foreground "dark green"))
+    (((class color) (background dark))
+     (:foreground "green"))
+    (((class color) (background light))
+     (:foreground "green"))
+    (t (:bold t)))
+  "Face used to highlight RFC authors in the *RFC INDEX* buffer."
+  :group 'rfcview)
+
 (defface rfcview:rfc-date-face
-  '((((class color) (background dark))
+  '((((class color) (min-colors 88) (background dark))
+     (:foreground "dodger blue"))
+    (((class color) (min-colors 88) (background light))
+     (:foreground "dodger blue"))
+    (((class color) (background dark))
      (:foreground "red"))
     (((class color) (background light))
      (:foreground "red"))
@@ -78,12 +108,16 @@
   :group 'rfcview)
 
 (defface rfcview:rfc-traits-face
-  '((((class color) (background dark))
+  '((((class color) (min-colors 88) (background dark))
+     (:foreground "dark gray"))
+    (((class color) (min-colors 88) (background light))
+     (:foreground "dim gray"))
+    (((class color) (background dark))
      (:foreground "gray"))
     (((class color) (background light))
      (:foreground "gray"))
     (t (:bold nil)))
-  "Face used to highlight RFC authors in the *RFC INDEX* buffer."
+  "Face used to highlight RFC traits in the *RFC INDEX* buffer."
   :group 'rfcview)
 
 (defface rfcview:mouse-face
@@ -100,48 +134,50 @@
                       '("January" "February" "March" "April" "May" "June" "July"
                         "August" "September" "October" "November" "December"))))
 
+(defconst rfcview:rfc-cache-default '(:last-modified (-33750 55928)))
+
 (defvar rfcview:previous-window-width 0)
 
 ;; Cache structure
 ;; (:last-modified lm-date
-;;  :list (:number 1
-;;         :title "Host Software."
-;;         :authors ("S. Crocker")
-;;         :date "April 1969"))
-;;        (:number 2
-;;         :title "Host software."
-;;         :authors ("B. Duvall")
-;;         :date "April 1969"))
+;;  :table #s(hash-table
+;;              size XXXX
+;;              data (1 (:title "Host Software."
+;;                       :authors ("S. Crocker")
+;;                       :date "April 1969")
+;;                    2 (:title "Host software."
+;;                       :authors ("B. Duvall")
+;;                       :date "April 1969")
 ;; ...
-;;        (:number 10
-;;         :title "Documentation conventions."
-;;         :authors ("S.D. Crocker")
-;;         :date "July 1969"
-;;         :obsoletes (RFC0003)
-;;         :obsoleted-by (RFC0016)
-;;         :updated-by (RFC0024 RFC0027 RFC0030)))
+;;                   10 (:title "Documentation conventions."
+;;                       :authors ("S.D. Crocker")
+;;                       :date "July 1969"
+;;                       :obsoletes (RFC0003)
+;;                       :obsoleted-by (RFC0016)
+;;                       :updated-by (RFC0024 RFC0027 RFC0030))
 ;; ...
-;;        (:number 24
-;;         :title "Documentation conventions."
-;;         :authors ("S.D. Crocker")
-;;         :date "November 1969"
-;;         :obsoletes (RFC0016)
-;;         :updates (RFC0010 RFC0016)
-;;         :updated-by (RFC0027 RFC0030)))
-;; ...)
+;;                   24 (:title "Documentation conventions."
+;;                       :authors ("S.D. Crocker")
+;;                       :date "November 1969"
+;;                       :obsoletes (RFC0016)
+;;                       :updates (RFC0010 RFC0016)
+;;                       :updated-by (RFC0027 RFC0030))
+;; ...))
 (defvar rfcview:rfc-cache nil
   "A cache of RFCs and their information.")
 
-(defun rfcview:initialize ()
+(defun rfcview:initialize (&optional force)
   "Initialize & update RFC index cache."
-  (if (null rfcview:rfc-cache)
-      (rfcview:load-cache))
+  (if force
+      (setq rfcview:rfc-cache rfcview:rfc-cache-default)
+    (when (null rfcview:rfc-cache)
+      (rfcview:load-cache)))
   (rfcview:update-index))
 
 (defun rfcview:load-cache ()
   "Load cache from a file or set invalid cache data."
   (setq rfcview:rfc-cache (or (rfcview:load-cache-internal rfcview:parsed-index-cache-file)
-                              '(:last-modified (0 0 0 1 1 1970 nil nil 0) :list nil))))
+                              rfcview:rfc-cache-default)))
 
 (defun rfcview:load-cache-internal (cache-file)
   "Load cache from a file."
@@ -156,6 +192,10 @@
     (insert (prin1-to-string rfcview:rfc-cache))
     (write-file rfcview:parsed-index-cache-file)))
 
+(defun rfcview:debug (format &rest args)
+  (when rfcview:use-debug
+    (apply #'message format args)))
+
 (defun rfcview:make-entry-line (number title date authors obsoletes obsoleted-by updates updated-by)
   "Make a propertized line containing a single RFC document information."
   ;; line format:
@@ -167,6 +207,10 @@
   (let ((width (- (window-body-width) 6))
         (str (format "%04d  " number))
         (margin "      ")
+        (traits (list (list :var obsoletes :text "Obsoletes")
+                      (list :var obsoleted-by :text "Obsoleted by")
+                      (list :var updates :text "Updates")
+                      (list :var updated-by :text "Updated by")))
         line-beg beg end)
     (setq end (length str))
     (when rfcview:use-face
@@ -184,11 +228,14 @@
               (setq str (concat str word)))
           (setq str (concat str "\n" margin word))
           (setq line-beg (- (length str) (length word))))))
+    (setq end (length str))
     (setq str (concat str "\n" margin))
+    (when rfcview:use-face
+      (put-text-property beg end 'face 'rfcview:rfc-title-face str))
 
     (let ((author-width (- width (length date) 2)))
       (setq beg (length str))
-      (setq str (concat str (format (format "%%-%ds  %%s" author-width)
+      (setq str (concat str (format (format "%%-%ds  %%s\n" author-width)
                                     (truncate-string-to-width
                                      (mapconcat (lambda (s) s) authors ", ")
                                      author-width)
@@ -196,20 +243,42 @@
       (setq end (length str))
       (when rfcview:use-face
         (put-text-property beg (- end (length date) 1) 'face 'rfcview:rfc-authors-face str)
-        (setq beg (- end (length date)))
+        (setq beg (- end (length date) 1))
         (put-text-property beg end 'face 'rfcview:rfc-date-face str))
       )
     (setq beg (length str))
-    ;; (cond ((obsoletes)
-    ;;        (
-
-    (concat str "\n")))
+    (dolist (trait traits)
+      (let ((var (plist-get trait :var))
+            (text (plist-get trait :text)))
+        (when (and trait var)
+          (setq str (concat str margin (format "%s: " text)
+                            (mapconcat
+                             (lambda (s)
+                               (let* ((num (string-to-int
+                                            (if (string-match "\\`RFC\\([0-9]\\{4\\}\\)\\'" s)
+                                                (replace-match "\\1" t nil s) "")))
+                                      (rfc (gethash num (plist-get rfcview:rfc-cache :table)))
+                                      prop)
+                                 (when rfcview:use-face
+                                   (setq prop (plist-put prop 'mouse-face 'rfcview:mouse-face)))
+                                 (setq prop (plist-put prop 'help-echo
+                                                       (format "%s <%s>\n%s" s
+                                                               (plist-get rfc :date)
+                                                               (plist-get rfc :title))))
+                                 (add-text-properties 0 (length s) prop s)
+                                 (format "%s" s)
+                                 )) var " ")
+                            "\n")))))
+    (setq end (length str))
+    (when (< beg end)
+      (put-text-property beg end 'face 'rfcview:rfc-traits-face str))
+    str))
 
 (defun rfcview:insert-with-text-properties (text number)
   "Insert an entry with text properties."
   (let (plist beg end)
-    (when rfcview:use-face
-      (setq plist (plist-put plist 'mouse-face 'rfcview:mouse-face)))
+    ;; (when rfcview:use-face
+    ;;   (setq plist (plist-put plist 'mouse-face 'rfcview:mouse-face)))
 
     (setq beg (point))
     (insert text)
@@ -218,28 +287,128 @@
           plist (plist-put plist 'read-only t))
     (add-text-properties beg end plist)))
 
-(defun rfcview:refresh-index (&optional buffer-or-name)
+(defvar rfcview:refresh-delay-timer nil)
+
+(defun rfcview:refresh-index (&optional force)
   "Refresh RFC index."
-  (unless (= (window-body-width) rfcview:previous-window-width)
-    (with-current-buffer (or (and buffer-or-name (get-buffer buffer-or-name)) (current-buffer))
+  ;; With helm, window width gets changed too frequently.
+  ;; This will delay the refreshing index for every window width update
+  ;; and will refresh if it is really required.
+  (when rfcview:refresh-delay-timer
+    (cancel-timer rfcview:refresh-delay-timer)
+    (setq rfcview:refresh-delay-timer nil))
+  (if (not force)
+      (unless (= (window-body-width) rfcview:previous-window-width)
+        (setq rfcview:refresh-delay-timer
+              (run-at-time "0.1 sec" nil
+                           (lambda (buffer)
+                             (with-current-buffer buffer
+                               (save-window-excursion
+                                 ;; (message "timer fired!")
+                                 (select-window (get-buffer-window (current-buffer)))
+                                 (unless (= (window-body-width) rfcview:previous-window-width)
+                                   (rfcview:refresh-index t))))) (current-buffer))))
+
+    (with-current-buffer (current-buffer)
+      (message "refreshing...")
       (let ((inhibit-read-only t)
+            (body-width (window-body-width))
             (saved-point (point)))
         (save-excursion
           (erase-buffer)
-          (dolist (rfc (plist-get rfcview:rfc-cache :list))
-            (rfcview:insert-with-text-properties
-             (rfcview:make-entry-line (plist-get rfc :number)
-                                      (plist-get rfc :title)
-                                      (plist-get rfc :date)
-                                      (plist-get rfc :authors)
-                                      (plist-get rfc :obsoletes)
-                                      (plist-get rfc :obsoleted-by)
-                                      (plist-get rfc :updates)
-                                      (plist-get rfc :updated-by))
-             (plist-get rfc :number))
-            (insert "\n")))
+          (insert (propertize (format (format "RFC INDEX%%%ds\n\n"
+                                              (- body-width 9))
+                                      (concat "Last Modified: "
+                                              (current-time-string
+                                               (plist-get rfcview:rfc-cache :last-modified)))
+                                      'rfcview:number 0)))
+          (when (hash-table-p (plist-get rfcview:rfc-cache :table))
+            (maphash (lambda (number data)
+                       (rfcview:insert-with-text-properties
+                        (rfcview:make-entry-line number
+                                                 (plist-get data :title)
+                                                 (plist-get data :date)
+                                                 (plist-get data :authors)
+                                                 (plist-get data :obsoletes)
+                                                 (plist-get data :obsoleted-by)
+                                                 (plist-get data :updates)
+                                                 (plist-get data :updated-by))
+                        number)
+                       (insert "\n"))
+                     (plist-get rfcview:rfc-cache :table))))
         (ignore-errors (goto-char saved-point)))
       (setq rfcview:previous-window-width (window-body-width)))))
+
+(defun rfcview:parse-index-entry (buffer)
+  "Parse an entry from rfc-index file."
+  (with-current-buffer buffer
+    (when (search-forward-regexp "^[0-9]\\{4\\} " nil t)
+      (let ((traits '((obsoletes . "Obsoletes\\s-+")
+                      (obeoleted-by . "Obsoleted\\s-+by\\s-+")
+                      (updates . "Updates\\s-+")
+                      (updated-by . "Updated\\s-+by\\s-+")))
+            (beg (- (point) 6))
+            end number title authors date trait-begin
+            obsoletes obsoleted-by updates updated-by)
+        (condition-case e
+            (progn
+              (setq end (save-excursion (search-forward-regexp "^$" nil t)))
+              (setq number (string-to-number (buffer-substring (point-at-bol) (point))))
+              (setq title (replace-regexp-in-string
+                           "\\s-+" " "
+                           (buffer-substring (point) (search-forward-regexp "\\.\\s-+" end t))))
+              (setq authors (let (result candidate)
+                              (dolist (auth (split-string
+                                             (replace-regexp-in-string
+                                              "\\s-+" " "
+                                              (buffer-substring (progn
+                                                                  (skip-chars-forward " \r\n")
+                                                                  (point))
+                                                                (progn
+                                                                  (search-forward-regexp
+                                                                   (concat
+                                                                    rfcview:month-name-pattern
+                                                                    "\\s-+[0-9]\\{4\\}") end t)
+                                                                  (search-backward "." nil t)
+                                                                  (point)))) ",\\s-+"))
+                                (if (and (string= auth "Ed.") (stringp candidate))
+                                    (progn
+                                      (push (concat candidate ", Ed.") result)
+                                      (setq candidate nil))
+                                  (if (stringp candidate)
+                                      (push candidate result))
+                                  (setq candidate auth)))
+                              (reverse (if (stringp candidate)
+                                           (push candidate result)
+                                         result))))
+              (setq date (replace-regexp-in-string
+                          "\\s-+" " "
+                          (buffer-substring (search-forward-regexp "\\s-+" end t)
+                                            (search-forward-regexp
+                                             (concat rfcview:month-name-pattern
+                                                     "\\s-+\\([0-9]\\{4\\}\\)") end t))))
+              (setq trait-begin (search-forward-regexp "\\s-+" end t))
+              (dolist (trait traits)
+                (goto-char trait-begin)
+                (set (car trait)
+                     (split-string
+                      (if (search-forward-regexp (concat "(" (cdr trait)) end t)
+                          (replace-regexp-in-string
+                           "\\s-+" " "
+                           (buffer-substring (point) (1- (search-forward ")" end t))))
+                        "")
+                      ",\\s-+" t)))
+              (list :number number
+                    :title title
+                    :authors authors
+                    :date date
+                    :obsoletes obsoletes
+                    :obsoleted-by obsoleted-by
+                    :updates updates
+                    :updated-by updated-by))
+          (error (rfcview:debug "parse error in rfc %d %S:\n%S"
+                                number (error-message-string e) (buffer-substring beg end))
+                 (error "Parse index entry error!")))))))
 
 (defun rfcview:parse-index-buffer (buffer)
   "Parse rfc-index file and create a structured cache."
@@ -249,75 +418,18 @@
                            (goto-char (point-min))
                            (unless (eq (point-min) (point-max))
                              (if (search-forward-regexp "^Last-Modified: " nil t)
-                                 (parse-time-string
+                                 (date-to-time
                                   (buffer-substring (1+ (point)) (point-at-eol)))))))
-          rfc-list)
-      (while (search-forward-regexp "^[0-9]\\{4\\} " nil t)
+          (rfc-table (make-hash-table :test 'equal))
+          (continue t)
+          entry)
+      (while continue
         (ignore-errors
-          (let* ((end (save-excursion (search-forward-regexp "^$" nil t)))
-                 (number (string-to-number (buffer-substring (point-at-bol) (point))))
-                 (title (replace-regexp-in-string
-                         "\\s-+" " "
-                         (buffer-substring (point) (search-forward-regexp "\\.\\s-+" end t))))
-                 (authors (let (result candidate)
-                            (dolist (auth (split-string
-                                           (replace-regexp-in-string
-                                            "\\s-+" " "
-                                            (buffer-substring (progn
-                                                                (skip-chars-forward " \r\n")
-                                                                (point))
-                                                              (progn
-                                                                (search-forward-regexp
-                                                                 rfcview:month-name-pattern end t)
-                                                                (search-backward "." nil t)
-                                                                (point)))) ",\\(\r\\|\n\\| \\)+"))
-                              (if (and (string= auth "Ed.") (stringp candidate))
-                                  (progn
-                                    (push (concat candidate ", Ed.") result)
-                                    (setq candidate nil))
-                                (if (stringp candidate)
-                                    (push candidate result))
-                                (setq candidate auth)))
-                            (reverse (if (stringp candidate)
-                                         (push candidate result)
-                                       result))))
-                 (date (replace-regexp-in-string
-                        "\\s-+" " "
-                        (buffer-substring (search-forward-regexp "\\s-+" end t)
-                                          (search-forward-regexp
-                                           (concat rfcview:month-name-pattern
-                                                   " \\([0-9]\\{4\\}\\)") end t))))
-                 (trait-begin (search-forward-regexp "\\s-+" end t))
-                 (traits '((obsoletes . "Obsoletes\\s-+")
-                           (obeoleted-by . "Obsoleted\\s-+by\\s-+")
-                           (updates . "Updates\\s-+")
-                           (updated-by . "Updated\\s-+by\\s-+")))
-                 obsoletes obsoleted-by updates updated-by)
-
-            (dolist (trait traits)
-              (goto-char trait-begin)
-              (set (car trait)
-                   (split-string
-                    (if (search-forward-regexp (concat "(" (cdr trait)) end t)
-                        (replace-regexp-in-string
-                         "\\s-+" " "
-                         (buffer-substring (point) (1- (search-forward ")" end t))))
-                      "")
-                    ",\\s-+")))
-            (push (list :number number
-                        :title title
-                        :authors authors
-                        :date date
-                        :obsoletes obsoletes
-                        :obsoleted-by obsoleted-by
-                        :updates updates
-                        :updated-by updated-by)
-                  rfc-list))))
-      (list :last-modified last-modified :list (sort rfc-list
-                                                     (lambda (a b)
-                                                       (< (plist-get a :number)
-                                                          (plist-get b :number))))))))
-
+          (setq entry (rfcview:parse-index-entry buffer))
+          (if entry
+              (puthash (plist-get entry :number) entry rfc-table)
+            (setq continue nil))))
+      (list :last-modified last-modified :table rfc-table))))
 
 (defun rfcview:index-updated-p ()
   "Check if rfc-index has been updated."
@@ -328,7 +440,7 @@
                              (if (search-forward-regexp "^Last-Modified: " nil t)
                                  (parse-time-string
                                   (buffer-substring (1+ (point)) (point-at-eol))))))))
-      (message "server last-modified: %S" last-modified)
+      ;; (message "server last-modified: %S" last-modified)
       (time-less-p (plist-get rfcview:rfc-cache :last-modified)
                    last-modified))))
 
@@ -432,9 +544,14 @@
     (define-key map (kbd "#") 'rfcview:index-goto-number)
     (define-key map (kbd " ") 'rfcview:index-read-item)
     (define-key map (kbd "RET") 'rfcview:index-read-item)
+    (define-key map (kbd "g") 'rfcview:index-refresh-screen)
     (define-key map (kbd "q") 'bury-buffer)
     map)
   "RFC INDEX key map.")
+
+(defun rfcview:index-refresh-screen ()
+  (interactive)
+  (rfcview:refresh-index t))
 
 (defun rfcview:index-forward-item ()
   (interactive)
@@ -493,7 +610,7 @@ Keybindings:
   (interactive)
   (set-buffer (get-buffer-create "*RFC INDEX*"))
   (rfcview:initialize)
-  (rfcview:refresh-index (current-buffer))
+  (rfcview:refresh-index t)
   (rfcview:index-mode)
   (select-window (display-buffer (current-buffer))))
 
