@@ -575,10 +575,12 @@
                (backward-paragraph)
                (point)))
          (target (next-single-property-change at 'rfcview:number)))
-    (when target
-      (if (< (get-text-property target 'rfcview:number) number)
-          (search-forward-regexp (format "^%04d  " number) (point-max) t)
-        (search-backward-regexp (format "^%04d  " number) (point-min) t)))))
+    (when (and target
+               (unless (and (> (get-text-property target 'rfcview:number) number)
+                            (search-backward-regexp (format "^%04d  " number) (point-min) t))
+                 (beginning-of-buffer)
+                 (search-forward-regexp (format "^%04d  " number) (point-max) t)))
+      (beginning-of-line))))
 
 (defun rfcview:index-read-item ()
   (interactive)
