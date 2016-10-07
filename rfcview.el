@@ -324,16 +324,20 @@
                            (lambda (buffer)
                              (with-current-buffer buffer
                                (save-window-excursion
-                                 ;; (message "timer fired!")
+                                 (rfcview:debug "refresh-delay-timer fired!")
                                  (select-window (get-buffer-window (current-buffer)))
                                  (unless (= (window-body-width) rfcview:previous-window-width)
                                    (rfcview:refresh-index t))))) (current-buffer))))
 
     (with-current-buffer (current-buffer)
-      (message "refreshing...")
+      (rfcview:debug "refreshing...")
       (let ((inhibit-read-only t)
             (body-width (window-body-width))
-            (saved-point (point)))
+            (saved-point (save-excursion
+                           (backward-paragraph)
+                           (get-text-property (next-single-property-change (point) 'rfcview:number)
+                                              'rfcview:number))))
+        (rfcview:debug "body-width=%S saved-point=%S" body-width saved-point)
         (save-excursion
           (erase-buffer)
           (insert (propertize (format (format "RFC INDEX%%%ds\n\n"
@@ -356,7 +360,7 @@
                         number)
                        (insert "\n"))
                      (plist-get rfcview:rfc-cache :table))))
-        (ignore-errors (goto-char saved-point)))
+        (ignore-errors (rfcview:index-goto-number saved-point)))
       (setq rfcview:previous-window-width (window-body-width)))))
 
 (defun rfcview:parse-index-entry (buffer)
