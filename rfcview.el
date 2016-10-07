@@ -335,7 +335,8 @@
             (body-width (window-body-width))
             (saved-point (save-excursion
                            (backward-paragraph)
-                           (get-text-property (next-single-property-change (point) 'rfcview:number)
+                           (get-text-property (or (next-single-property-change (point) 'rfcview:number)
+                                                  (point-min))
                                               'rfcview:number))))
         (rfcview:debug "body-width=%S saved-point=%S" body-width saved-point)
         (save-excursion
