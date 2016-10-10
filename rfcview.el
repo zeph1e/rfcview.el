@@ -120,6 +120,15 @@
   "Face used to highlight RFC traits in the *RFC INDEX* buffer."
   :group 'rfcview)
 
+(defface rfcview:button-face
+  '((((class color) (background dark))
+     (:foreground "cyan"))
+    (((class color) (background light))
+     (:foreground "cyan"))
+    (t (:bold t)))
+  "Face used to highlight button in the *RFC INDEX* buffer."
+  :group 'rfcview)
+
 (defface rfcview:mouse-face
   '((((class color) (background dark))
      (:foreground "white" :background "blue"))
@@ -128,6 +137,10 @@
     (t (:bold nil)))
   "Face used when mouse pointer is within the region of an entry."
   :group 'rfcview)
+
+(define-button-type 'rfcview:rfc-link-button
+  'face 'rfcview:button-face
+  'mouse-face 'rfcview:mouse-face)
 
 (defvar rfcview:month-name-pattern
   (eval-when-compile (regexp-opt
@@ -270,22 +283,8 @@
         (when (and trait var)
           (setq str (concat str margin (format "%s: " text)
                             (rfcview:wrap-text-at-word-boundary
-                             (mapconcat
-                              (lambda (s)
-                                (let* ((num (string-to-int
-                                             (if (string-match "\\`RFC\\([0-9]\\{4\\}\\)\\'" s)
-                                                 (replace-match "\\1" t nil s) "")))
-                                       (rfc (gethash num (plist-get rfcview:rfc-cache :table)))
-                                       prop)
-                                  (when rfcview:use-face
-                                    (setq prop (plist-put prop 'mouse-face 'rfcview:mouse-face)))
-                                  (setq prop (plist-put prop 'help-echo
-                                                        (format "%s\t<%s>\n%s" s
-                                                                (plist-get rfc :date)
-                                                                (plist-get rfc :title))))
-                                  (add-text-properties 0 (length s) prop s)
-                                  (format "%s" s)
-                                  )) var " ")
+                             (mapconcat (lambda (s) (format "[%s]" s))
+                                        var " ")
                              (+ margin-width (length text) 2)
                              (- body-width 8))
                             "\n")))))
@@ -305,7 +304,21 @@
     (setq end (point)
           plist (plist-put plist 'rfcview:number number)
           plist (plist-put plist 'read-only t))
-    (add-text-properties beg end plist)))
+    (add-text-properties beg end plist)
+    ;;now make buttons
+    (save-excursion
+      (goto-char beg)
+      (while (search-forward-regexp "\[RFC[0-9]\\{4\\}\]" end 'noerror)
+        (let* ((bbtn (- (point) 9))
+               (ebtn (point))
+               (num (string-to-int (buffer-substring (+ bbtn 4) ebtn)))
+               (rfc (gethash num (plist-get rfcview:rfc-cache :table))))
+          (make-button bbtn ebtn
+                            'number num
+                            'type 'rfcview:rfc-link-button
+                            'action (lambda (btn) (rfcview:index-goto-number
+                                                   (button-get btn 'number)))
+                            'help-echo (plist-get rfc :title)))))))
 
 (defvar rfcview:refresh-delay-timer nil)
 
@@ -569,6 +582,8 @@
     (define-key map (kbd "#") 'rfcview:index-goto-number)
     (define-key map (kbd " ") 'rfcview:index-read-item)
     (define-key map (kbd "RET") 'rfcview:index-read-item)
+    (define-key map (kbd "TAB") 'forward-button)
+    (define-key map (kbd "<backtab>") 'backward-button)
     (define-key map (kbd "g") 'rfcview:index-refresh-screen)
     (define-key map (kbd "q") 'bury-buffer)
     map)
