@@ -246,11 +246,12 @@ create the cache from scratch."
 
 (defun rfcview:wrap-text-at-word-boundary (text margin-width max-width &optional delimiters)
   "Wrap text at word boundary to fit in given width."
+  (setq delimiters (or delimiters " "))
   (let (phrase line offset word-len)
     (if (< (length text) (- max-width margin-width))
-        text
+        (replace-regexp-in-string delimiters " " text)
       (setq offset margin-width)
-      (dolist (word (split-string text (if delimiters delimiters " ") t))
+      (dolist (word (split-string text delimiters t))
         (setq word-len (length word))
         (if (< word-len (- max-width offset))
             ;; possible to insert in the end of this line
