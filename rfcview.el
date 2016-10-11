@@ -50,6 +50,11 @@
   :type 'integer
   :group 'rfcview)
 
+(defcustom rfcview:keyword-max-history 10
+  "The maximum count of keyword seach history."
+  :type 'integer
+  :group 'rfcview)
+
 (defcustom rfcview:retrieve-timeout 10
   "The timeout to try retrieve rfc materials from server."
   :type 'integer
@@ -294,18 +299,36 @@ create the cache from scratch."
       (put-text-property 0 end 'face 'rfcview:rfc-number-face str))
 
     (setq beg end)
+
+    (when (and rfcview:use-debug (eq rfcview:index-filter 'rfcview:index-filter-function-keywords))
+      (setq title (concat title (format " (relevance: %d)"
+                                        (cdr (assoc number rfcview:filter-keyword-current-result))))))
+
     (setq str (concat str (rfcview:wrap-text-at-word-boundary title margin-width body-width)))
     (setq end (length str))
     (setq str (concat str "\n" margin))
     (when rfcview:use-face
-      (put-text-property beg end 'face 'rfcview:rfc-title-face str))
+      (put-text-property beg end 'face 'rfcview:rfc-title-face str)
+
+      ;; highlight matched keywords
+      (when (eq rfcview:index-filter 'rfcview:index-filter-function-keywords)
+        (let ((title-beg beg))
+        (dolist (keyword (split-string rfcview:filter-keyword-current-keyword nil t))
+          ;; (message "keyword=%S" keyword)
+          (setq pos title-beg)
+          (while (string-match keyword str pos)
+            ;; (message "pos: %d, begin: %d, end: %d" pos (match-beginning 0) (match-end 0))
+            (put-text-property (match-beginning 0) (match-end 0)
+                               'face 'rfcview:rfc-selected-filter-face
+                               str)
+            (setq pos (match-end 0)))))))
 
     (let ((author-width (- body-width margin-width (length date) 2)))
       (setq beg (length str))
       (setq str (concat str (format (format "%%-%ds  %%s\n" author-width)
                                     (truncate-string-to-width
                                      (mapconcat (lambda (s) s) authors ", ")
-                                     author-width)
+                                     author-width 0 nil "...")
                                     date)))
       (setq end (length str))
       (when rfcview:use-face
@@ -511,34 +534,38 @@ create the cache from scratch."
   (cond ((eq filter 'rfcview:index-filter-function-favorite) "[Favorites]")
         ((eq filter 'rfcview:index-filter-function-recent) "[Recents]")
         ((eq filter 'rfcview:index-filter-function-keywords)
-         (format "[Keywords: %S]" rfcview:filter-keyword-current-keyword))
+         (format "[%S]" rfcview:filter-keyword-current-keyword))
         (t "[All]")))
 
 (defun rfcview:refresh-filter-line (max-width)
   (let ((beg (point))
+        (filter-header "Filters: ")
         (filter-name (rfcview:get-filter-name rfcview:index-filter))
         (filters (remove rfcview:index-filter '(nil
                                                 rfcview:index-filter-function-favorite
                                                 rfcview:index-filter-function-recent)))
         end)
-    (insert "Filters: "
+    (insert filter-header
             (rfcview:wrap-text-at-word-boundary
              (concat (propertize filter-name 'face 'rfcview:rfc-selected-filter-face) " "
                      (mapconcat (lambda (f)
                                   (propertize (rfcview:get-filter-name f) 'filter f))
                                 filters "'")
                      "'"
-                     (mapconcat (lambda (history)
+                     (propertize "[Search Keywords]" 'filter ""))
+             (length filter-header) max-width "'")
+            "\n\n"
+            (make-string (length filter-header) ?\s)
+            (rfcview:wrap-text-at-word-boundary
+             (concat (mapconcat (lambda (history)
                                   (unless (string= rfcview:filter-keyword-current-keyword
-                                               (car history))
+                                                   (car history))
                                     (let ((rfcview:filter-keyword-current-keyword (car history)))
                                       (propertize
                                        (rfcview:get-filter-name 'rfcview:index-filter-function-keywords)
                                        'filter (car history)))))
-                                rfcview:filter-keywords-history "'")
-                     (when rfcview:filter-keywords-history "'")
-                     (propertize "[New Keyword Filter]" 'filter ""))
-                     9 max-width "'")
+                                rfcview:filter-keywords-history "'"))
+             (length filter-header) max-width "'")
             "\n")
     (setq end (point))
     (save-excursion
@@ -590,9 +617,14 @@ create the cache from scratch."
                                      (split-string (read-from-minibuffer "Keywords: ") "[ \t\n\r\v']")
                                      " ")))
            (when rfcview:filter-keyword-current-keyword
-               (add-to-list 'rfcview:filter-keywords-history
-                            (cons rfcview:filter-keyword-current-keyword
-                                  rfcview:filter-keyword-current-result)))
+             ;; TODO: fix me to check history items' keywords
+             (add-to-list 'rfcview:filter-keywords-history
+                          (cons rfcview:filter-keyword-current-keyword
+                                rfcview:filter-keyword-current-result))
+             (while (> (length rfcview:filter-keywords-history)
+                       rfcview:keyword-max-history)
+               (setq rfcview:filter-keywords-history
+                     (butlast rfcview:filter-keywords-history))))
            (setq rfcview:index-filter 'rfcview:index-filter-function-keywords
                  rfcview:filter-keyword-current-keyword filter
                  rfcview:filter-keyword-current-result nil)
@@ -717,7 +749,7 @@ create the cache from scratch."
     (define-key map (kbd "p") 'rfcview:index-backward-item)
     (define-key map (kbd "n") 'rfcview:index-forward-item)
     (define-key map (kbd "v") 'rfcview:index-toggle-favorite)
-    (define-key map (kbd "f") 'rfcview:index-show-filter)
+    (define-key map (kbd "f") 'rfcview:index-goto-filter)
     (define-key map (kbd "?") 'rfcview:index-show-help)
     (define-key map (kbd "#") 'rfcview:index-goto-number)
     (define-key map (kbd " ") 'rfcview:index-read-item)
@@ -792,6 +824,11 @@ create the cache from scratch."
     (when moveto
       (goto-char moveto))))
 
+(defun rfcview:index-goto-filter ()
+  (interactive)
+  (goto-char (point-min))
+  (forward-button 1))
+
 (defun rfcview:index-read-item (&optional number)
   (interactive)
   (setq number (or number
@@ -818,8 +855,7 @@ create the cache from scratch."
           (message "RFC%04d was removed from favorite list." number))
       (push number favorite)
       (message "RFC%04d was added to favorite list." number))
-    (sort favorite '<)
-    (plist-put rfcview:rfc-cache :favorite favorite)
+    (plist-put rfcview:rfc-cache :favorite (sort favorite '<))
     (rfcview:index-refresh-entry number)))
 
 ;; (("keywordA" . '((1 . 33) (59 . 92) (205 . 88) (3333 . 87)...) --> (number . score)
@@ -837,16 +873,15 @@ create the cache from scratch."
   (let (history (assoc rfcview:filter-keyword-current-keyword))
     (if history
         (mapcar (lambda (e) (car e)) (cdr history))
+      (setq rfcview:filter-keyword-current-result nil)
       (maphash (lambda (key value)
                  (let* ((title (plist-get value :title))
                         (keywords (split-string rfcview:filter-keyword-current-keyword
                                                 "\\s-+" t))
-                        (seed (if (> (length keywords) 0) (/ 60 (length keywords)) 1))
+                        (seed (if (> (length keywords) 0) (/ 40 (length keywords)) 1))
                         score)
                    (setq score (cond ((string-match
-                                       (concat "\\W+"
-                                               (mapconcat (lambda (s) s) keywords "\\W+")
-                                               "\\W+") title) 100)
+                                       (concat (mapconcat (lambda (s) s) keywords "\\W+")) title) 100)
                                      ((string-match
                                        (mapconcat (lambda (s) s) keywords "\\W*")  title) 80)
                                      ((string-match
@@ -859,8 +894,11 @@ create the cache from scratch."
                    (when (> score 0)
                      (push (cons key score) rfcview:filter-keyword-current-result))))
                (plist-get rfcview:rfc-cache :table))
-      (sort rfcview:filter-keyword-current-result (lambda (a b) (> (cdr a) (cdr b))))
       ;; (message "%S" rfcview:filter-keyword-current-result)
+      (setq rfcview:filter-keyword-current-result
+            (sort rfcview:filter-keyword-current-result (lambda (a b)
+                                                          (and (> (cdr a) (cdr b))
+                                                               (< (car a) (car b))))))
       (mapcar (lambda (e) (car e)) rfcview:filter-keyword-current-result))))
 
 (defun rfcview:index-filter-function-favorite ()
