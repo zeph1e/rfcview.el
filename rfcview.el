@@ -833,7 +833,7 @@ create the cache from scratch."
          (moveto (save-excursion
                    (when target
                      (beginning-of-buffer)
-                     (search-forward-regexp (format "^%04d  " number) (point-max) t)
+                     (search-forward-regexp (format "^%04d\\(*\\| \\) " number) (point-max) t)
                      (beginning-of-line)
                      (point)))))
     (when moveto
