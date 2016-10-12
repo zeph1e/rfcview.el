@@ -984,13 +984,15 @@ Keybindings:
 (defun rfcview ()
   "Shows RFC index"
   (interactive)
-  (let ((buffer (get-buffer "*RFC INDEX*")))
+  (let ((buffer (get-buffer "*RFC INDEX*"))
+        (force nil))
     (unless buffer
-      (setq buffer (set-buffer (get-buffer-create "*RFC INDEX*")))
+      (setq buffer (set-buffer (get-buffer-create "*RFC INDEX*"))
+            force t)
       (buffer-disable-undo)
       (rfcview:initialize)
-      (rfcview:index-mode)
-      (rfcview:refresh-index t))
-    (select-window (display-buffer buffer))))
+      (rfcview:index-mode))
+    (select-window (display-buffer buffer))
+    (rfcview:refresh-index force)))
 
 (provide 'rfcview)
