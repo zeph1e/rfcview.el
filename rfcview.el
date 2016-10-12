@@ -5,7 +5,7 @@
 ;; Author: Yunsik Jang <doomsday@kldp.org>
 ;; Homepage: http://github.com/zeph1e/rfcview.el
 ;; Created: 5 Oct 2016
-;; Version: 0.1
+;; Version: 0.2
 ;; Keywords: docs
 ;; License: WTFPL (http://sam.zoy.org/wtfpl)
 ;;
@@ -15,7 +15,14 @@
 ;;; Commentary:
 
 ;;; Change Log:
-
+;;
+;;  0.2 - 12 Oct 2016 - family link & filters
+;;
+;;   - add links of family RFC, which succeed or precede the RFC,
+;;     into the bottom of RFC entries in index.
+;;   - supports filters: recent, favorite, keywords search,
+;;   - misc. fixes & refactorings on listing & line-wrapping.
+;;
 ;;; Code:
 
 (require 'url)
