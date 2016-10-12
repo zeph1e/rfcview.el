@@ -824,11 +824,9 @@ create the cache from scratch."
                (point)))
          (target (next-single-property-change at 'rfcview:number))
          (moveto (save-excursion
-                   (when (and target
-                              (unless (and (> (get-text-property target 'rfcview:number) number)
-                                           (search-backward-regexp (format "^%04d  " number) (point-min) t))
-                                (beginning-of-buffer)
-                                (search-forward-regexp (format "^%04d  " number) (point-max) t)))
+                   (when target
+                     (beginning-of-buffer)
+                     (search-forward-regexp (format "^%04d  " number) (point-max) t)
                      (beginning-of-line)
                      (point)))))
     (when moveto
