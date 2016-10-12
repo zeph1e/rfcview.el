@@ -173,6 +173,15 @@
   "Face used when mouse pointer is within the region of an entry."
   :group 'rfcview)
 
+(defface rfcview:entry-highlight-face
+  '((((class color) (min-colors 88) (background dark))
+     (:background "gray20"))
+    (((class color) (min-colors 88) (background light))
+     (:background "gray70")))
+  "Face used to highlight current entry."
+  :group 'rfcview)
+
+
 (define-button-type 'rfcview:rfc-link-button
   'face 'rfcview:button-face
   'mouse-face 'rfcview:mouse-face)
@@ -844,6 +853,18 @@ create the cache from scratch."
   (goto-char (point-min))
   (forward-button 1))
 
+(defun rfcview:move-entry-highlight ()
+  (when (boundp 'rfcview:background-highlight-overlay)
+    (unless (overlayp rfcview:background-highlight-overlay)
+      (setq rfcview:background-highlight-overlay (make-overlay 0 0))
+      (overlay-put rfcview:background-highlight-overlay 'face 'rfcview:entry-highlight-face))
+    (let* ((at (save-excursion
+                 (backward-paragraph)
+                 (point)))
+           (beg (next-single-property-change at 'rfcview:number))
+           (end (next-single-property-change beg 'rfcview:number)))
+      (move-overlay rfcview:background-highlight-overlay beg end))))
+
 (defun rfcview:index-read-item (&optional number)
   (interactive)
   (setq number (or number
@@ -964,6 +985,12 @@ create the cache from scratch."
 (defun rfcview:index-filter-function-recent ()
   (plist-get rfcview:rfc-cache :recent))
 
+(defun rfcview:index-cleanup ()
+  (rfcview:save-cache)
+  (when (overlayp rfcview:background-highlight-overlay)
+    (delete-overlay rfcview:background-highlight-overlay))
+  (setq rfcview:rfc-cache nil))
+
 (defun rfcview:index-mode ()
   "Major mode to list RFC documents.
 
@@ -975,9 +1002,10 @@ Keybindings:
   (setq mode-name "RFC-INDEX"
         major-mode 'rfcview:index-mode
         buffer-read-only t)
-  (make-local-variable 'window-configuration-change-hook)
-  (set (make-local-variable 'kill-buffer-hook) 'rfcview:save-cache)
-  (add-hook 'window-configuration-change-hook 'rfcview:refresh-index)
+  (set (make-local-variable 'rfcview:background-highlight-overlay) nil)
+  (set (make-local-variable 'kill-buffer-hook) 'rfcview:index-cleanup)
+  (add-hook 'post-command-hook 'rfcview:move-entry-highlight t t)
+  (add-hook 'window-configuration-change-hook 'rfcview:refresh-index t t)
   (run-hooks 'rfcview:index-mode-hook))
 
 ;;;###autoload
