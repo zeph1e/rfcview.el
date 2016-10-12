@@ -922,6 +922,7 @@ Keybindings:
         major-mode 'rfcview:index-mode
         buffer-read-only t)
   (make-local-variable 'window-configuration-change-hook)
+  (set (make-local-variable 'kill-buffer-hook) 'rfcview:save-cache)
   (add-hook 'window-configuration-change-hook 'rfcview:refresh-index)
   (run-hooks 'rfcview:index-mode-hook))
 
