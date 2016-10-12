@@ -376,7 +376,7 @@ create the cache from scratch."
       (while (search-forward-regexp "RFC[0-9]\\{4\\}" end 'noerror)
         (let* ((bbtn (- (point) 7))
                (ebtn (point))
-               (num (string-to-int (buffer-substring (+ bbtn 4) ebtn)))
+               (num (string-to-int (buffer-substring (+ bbtn 3) ebtn)))
                (rfc (gethash num (plist-get rfcview:rfc-cache :table))))
           (make-button bbtn ebtn
                             'number num
@@ -810,6 +810,8 @@ create the cache from scratch."
 
 (defun rfcview:index-goto-number (number)
   (interactive (values (string-to-int (read-from-minibuffer "RFC number: "))))
+  (unless (member number rfcview:index-current-list-items)
+    (error "No such RFC number in current (filtered) index."))
   (let* ((at (save-excursion
                (backward-paragraph)
                (point)))
@@ -820,7 +822,8 @@ create the cache from scratch."
                                            (search-backward-regexp (format "^%04d  " number) (point-min) t))
                                 (beginning-of-buffer)
                                 (search-forward-regexp (format "^%04d  " number) (point-max) t)))
-                     (beginning-of-line)))))
+                     (beginning-of-line)
+                     (point)))))
     (when moveto
       (goto-char moveto))))
 
