@@ -861,8 +861,16 @@ create the cache from scratch."
     (let* ((at (save-excursion
                  (backward-paragraph)
                  (point)))
-           (beg (next-single-property-change at 'rfcview:number))
+           (beg (next-single-property-change at  'rfcview:number))
            (end (next-single-property-change beg 'rfcview:number)))
+      ;; (message "beg=%S end=%S" (get-text-property beg 'rfcview:number)
+      ;;          (get-text-property end 'rfcview:number))
+      (when (or (and (number-or-marker-p beg)
+                     (eq 0 (get-text-property beg 'rfcview:number)))
+                (and (number-or-marker-p end)
+                     (eq 0 (get-text-property end 'rfcview:number))))
+        (setq beg (point-min)
+              end (point-min)))
       (move-overlay rfcview:background-highlight-overlay beg end))))
 
 (defun rfcview:index-read-item (&optional number)
