@@ -995,8 +995,9 @@ create the cache from scratch."
 
 (defun rfcview:index-cleanup ()
   (rfcview:save-cache)
-  (when (overlayp rfcview:background-highlight-overlay)
-    (delete-overlay rfcview:background-highlight-overlay))
+  (with-current-buffer (get-buffer "*RFC INDEX*")
+    (when (overlayp rfcview:background-highlight-overlay)
+      (delete-overlay rfcview:background-highlight-overlay)))
   (setq rfcview:rfc-cache nil))
 
 (defun rfcview:index-mode ()
@@ -1011,7 +1012,8 @@ Keybindings:
         major-mode 'rfcview:index-mode
         buffer-read-only t)
   (set (make-local-variable 'rfcview:background-highlight-overlay) nil)
-  (set (make-local-variable 'kill-buffer-hook) 'rfcview:index-cleanup)
+  (add-hook 'kill-buffer-hook 'rfcview:index-cleanup t t)
+  (add-hook 'kill-emacs-hook 'rfcview:index-cleanup)
   (add-hook 'post-command-hook 'rfcview:move-entry-highlight t t)
   (add-hook 'window-configuration-change-hook 'rfcview:refresh-index t t)
   (run-hooks 'rfcview:index-mode-hook))
