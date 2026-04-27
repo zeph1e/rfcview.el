@@ -37,7 +37,7 @@
   :type 'string
   :group 'rfcview)
 
-(defcustom rfcview:local-directory (concat user-emacs-directory "RFC/")
+(defcustom rfcview:local-directory (concat user-emacs-directory ".RFC/")
   "The location where to store downloaded RFC files."
   :type 'string
   :group 'rfcview)
@@ -391,7 +391,7 @@ create the cache from scratch."
       (while (search-forward-regexp "RFC[0-9]\\{4\\}" end 'noerror)
         (let* ((bbtn (- (point) 7))
                (ebtn (point))
-               (num (string-to-int (buffer-substring (+ bbtn 3) ebtn)))
+               (num (string-to-number (buffer-substring (+ bbtn 3) ebtn)))
                (rfc (gethash num (plist-get rfcview:rfc-cache :table))))
           (make-button bbtn ebtn
                             'number num
@@ -488,7 +488,7 @@ create the cache from scratch."
         (condition-case e
             (progn
               (setq end (save-excursion (search-forward-regexp "^$" nil t)))
-              (setq number (string-to-number (buffer-substring (point-at-bol) (point))))
+              (setq number (string-to-number (buffer-substring (line-beginning-position) (point))))
               (setq title (replace-regexp-in-string
                            "\\s-+" " "
                            (buffer-substring (point) (search-forward-regexp "\\.\\s-+" end t))))
@@ -621,7 +621,7 @@ create the cache from scratch."
                            (unless (eq (point-min) (point-max))
                              (if (search-forward-regexp "^Last-Modified: " nil t)
                                  (date-to-time
-                                  (buffer-substring (1+ (point)) (point-at-eol)))))))
+                                  (buffer-substring (1+ (point)) (line-end-position)))))))
           (rfc-table (make-hash-table :test 'equal))
           (continue t)
           entry)
@@ -655,7 +655,7 @@ create the cache from scratch."
                            (unless (eq (point-min) (point-max))
                              (if (search-forward-regexp "^Last-Modified: " nil t)
                                  (parse-time-string
-                                  (buffer-substring (1+ (point)) (point-at-eol))))))))
+                                  (buffer-substring (1+ (point)) (line-end-position))))))))
       ;; (message "server last-modified: %S" last-modified)
       (time-less-p (plist-get rfcview:rfc-cache :last-modified)
                    last-modified))))
@@ -832,7 +832,7 @@ create the cache from scratch."
     (when target (goto-char target))))
 
 (defun rfcview:index-goto-number (number)
-  (interactive (values (string-to-int (read-from-minibuffer "RFC number: "))))
+  (interactive (list (string-to-number (read-from-minibuffer "RFC number: "))))
   (unless (member number rfcview:index-current-list-items)
     (error "No such RFC number in current (filtered) index."))
   (let* ((at (save-excursion
@@ -841,7 +841,7 @@ create the cache from scratch."
          (target (next-single-property-change at 'rfcview:number))
          (moveto (save-excursion
                    (when target
-                     (beginning-of-buffer)
+                     (goto-char (point-min))
                      (search-forward-regexp (format "^%04d\\(*\\| \\) " number) (point-max) t)
                      (beginning-of-line)
                      (point)))))
