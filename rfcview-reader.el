@@ -101,10 +101,7 @@
                      'type 'rfcview:rfc-link-button
                      'number num
                      'action (lambda (btn)
-                               (let ((n (button-get btn 'number)))
-                                 (when (get-buffer "*RFC INDEX*")
-                                   (with-current-buffer "*RFC INDEX*"
-                                     (rfcview:index-goto-number n)))))
+                               (rfcview:read-rfc (button-get btn 'number)))
                      'help-echo (when rfc (plist-get rfc :title)))))))
 
 (defun rfcview:read-mode ()
@@ -183,8 +180,7 @@ Tries plain-text first; falls back to PDF on a 404 response."
                       ((file-exists-p txt-file) (rfcview:open-rfc-txt number txt-file))
                       ((file-exists-p pdf-file)  (rfcview:open-rfc-pdf number pdf-file))
                       (t                          (rfcview:download-rfc number txt-file pdf-file))))))
-    (with-selected-window (get-buffer-window "*RFC INDEX*")
-      (switch-to-buffer buffer))))
+    (pop-to-buffer buffer)))
 
 (provide 'rfcview-reader)
 ;;; rfcview-reader.el ends here
