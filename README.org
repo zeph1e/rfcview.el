@@ -1,39 +1,95 @@
 * rfcview
 
-This elisp script, *rfcview* is an Emacs tool which helps to browse, to download, and to read RFC documents in Emacs. When you run *rfcview*, it will update RFC index if it is required.
+*rfcview* is an Emacs tool for browsing, downloading, and reading IETF RFC documents inside Emacs. When you run *rfcview*, it updates the RFC index if necessary, then presents an interactive index buffer.
 
-* Installation
+** Features
 
-** el-get
+- Browse the full IETF RFC index with author, date, and cross-reference links
+- Filter by favorites, recently read, or keyword search (scored and ranked)
+- Download and cache RFC documents locally on first access
+- Rich read mode: section-heading highlighting, hidden page headers/footers, clickable =RFC XXXX= cross-references, and section navigation with =[= / =]=
+- Fast window resize — layout uses Emacs's built-in word-wrap engine, not pre-computed strings
 
-The recipe of this package is not yet in [[https://github.com/dimitri/el-get][el-get]] official repository, you should download and copy the recipe into your local directory which are added to *el-get-recipe-path*.
+** Installation
 
-Assume that you already added =~/.emacs.d/recipes/= into *el-get-recipe-path*:
+*** el-get
 
-#+NAME: el-get recipe
+The recipe is not yet in the [[https://github.com/dimitri/el-get][el-get]] official repository. Download and copy it into a directory on =el-get-recipe-path=.
+
+Assuming =~/.emacs.d/recipes/= is on =el-get-recipe-path=:
+
 #+BEGIN_SRC sh
 $ wget https://raw.githubusercontent.com/zeph1e/rfcview.el/rfcview.rcp
 $ cp rfcview.rcp ~/.emacs.d/recipes/
 #+END_SRC
 
-And then add a following line into your emacs init script:
+Then add to your Emacs init file:
 
-#+NAME: el-get bundle
 #+BEGIN_SRC emacs-lisp
 (el-get-bundle rfcview)
 #+END_SRC
 
-** Manual
+*** straight.el
 
-Just download and add following lines into your emacs init script:
-
-#+NAME: manual autolaod
 #+BEGIN_SRC emacs-lisp
-;; if you placed rfcview.el into ~/.emacs.d/rfcview/
+(straight-use-package
+ '(rfcview :host github :repo "zeph1e/rfcview.el" :files ("*.el")))
+#+END_SRC
+
+*** use-package with straight.el
+
+#+BEGIN_SRC emacs-lisp
+(use-package rfcview
+  :straight (:host github :repo "zeph1e/rfcview.el" :files ("*.el"))
+  :commands rfcview)
+#+END_SRC
+
+*** use-package :vc (Emacs 30+)
+
+#+BEGIN_SRC emacs-lisp
+(use-package rfcview
+  :vc (:url "https://github.com/zeph1e/rfcview.el" :rev :newest)
+  :commands rfcview)
+#+END_SRC
+
+*** Manual
+
+Place all four =.el= files (=rfcview.el=, =rfcview-core.el=, =rfcview-index.el=, =rfcview-reader.el=) in the same directory and add:
+
+#+BEGIN_SRC emacs-lisp
+;; e.g. if placed in ~/.emacs.d/rfcview/
 (add-to-list 'load-path "~/.emacs.d/rfcview")
 (autoload 'rfcview "rfcview" t t)
 #+END_SRC
 
-* License
+** Usage
+
+=M-x rfcview= opens the =*RFC INDEX*= buffer.
+
+| Key       | Action                              |
+|-----------+-------------------------------------|
+| =RET= / =SPC= | Open RFC under point            |
+| =n= / =p=     | Next / previous entry           |
+| =v=           | Toggle favorite                 |
+| =A=           | Show all                        |
+| =F=           | Show favorites                  |
+| =R=           | Show recently read              |
+| =K=           | Keyword search                  |
+| =#=           | Jump to RFC by number           |
+| =f=           | Jump to filter line             |
+| =g=           | Refresh index                   |
+| =q=           | Bury buffer                     |
+
+In an RFC read buffer:
+
+| Key       | Action                              |
+|-----------+-------------------------------------|
+| =]= / =[=     | Next / previous section heading |
+| =/= / =?=     | Search forward / backward       |
+| =j= / =k=     | Next / previous line (vi)       |
+| =+= / =-=     | Increase / decrease font size   |
+| =q=           | Bury buffer                     |
+
+** License
 
 [[http://www.wtfpl.net][WTFPL version 2]]
