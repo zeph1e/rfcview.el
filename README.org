@@ -90,6 +90,20 @@ In an RFC read buffer:
 | =+= / =-=     | Increase / decrease font size   |
 | =q=           | Bury buffer                     |
 
+** PDF support
+
+Some RFCs are only published as PDF (e.g. RFC 8).  rfcview automatically falls back to PDF when a plain-text edition returns a 404 response, and also checks for a locally cached =.pdf= file before attempting a download.
+
+Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]].  rfcview does not declare a hard dependency on it; if pdf-tools is not installed, opening a PDF-only RFC signals an error.  An example configuration is provided in =config/pdf.el=:
+
+#+BEGIN_SRC emacs-lisp
+(use-package pdf-tools
+  :straight t
+  :magic ("%PDF" . pdf-view-mode)
+  :config
+  (pdf-tools-install :no-query))
+#+END_SRC
+
 ** License
 
 [[http://www.wtfpl.net][WTFPL version 2]]

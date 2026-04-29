@@ -217,12 +217,24 @@
                 (error "HTTP error!")))))
       (current-buffer))))
 
-(defun rfcview:retrieve-rfc (number)
-  "Retrieve a RFC document from the server."
+(defun rfcview:http-response-status (buffer)
+  "Return the HTTP status code from BUFFER as an integer, or nil."
+  (with-current-buffer buffer
+    (if (and (boundp 'url-http-response-status) url-http-response-status)
+        url-http-response-status
+      (save-excursion
+        (goto-char (point-min))
+        (when (re-search-forward "^HTTP/[0-9.]+ \\([0-9]+\\)" nil t)
+          (string-to-number (match-string 1)))))))
+
+(defun rfcview:retrieve-rfc (number &optional format)
+  "Retrieve RFC NUMBER from server. FORMAT is \\='txt (default) or \\='pdf."
   (unless (numberp number)
     (error "NUMBER argument is not numeric."))
   (rfcview:retrieve
-   (concat rfcview:rfc-base-url "/rfc" (format "%d" number) ".txt")))
+   (if (eq format 'pdf)
+       (concat rfcview:rfc-base-url (format "rfc%d.pdf" number))
+     (concat rfcview:rfc-base-url (format "rfc%d.txt" number)))))
 
 (defun rfcview:retrieve-index (&optional method)
   "Retrieve the RFC index from the server."

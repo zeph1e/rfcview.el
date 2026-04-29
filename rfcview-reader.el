@@ -119,24 +119,70 @@
   (rfcview:read-buttonize-refs)
   (run-hooks 'rfcview-read-mode-hook))
 
-(defun rfcview:read-rfc (number)
-  (let* ((buffer-name (format "*RFC %04d*" number))
-         (buffer (get-buffer buffer-name)))
-    (unless buffer
-      (setq buffer (get-buffer-create (format "*RFC %04d*" number)))
-      (let ((filename (format "%s/rfc%04d.txt" rfcview:local-directory number)))
-        (unless (file-exists-p filename)
-          (message "Downloading RFC%04d..." number)
-          (with-current-buffer (rfcview:retrieve-rfc number)
+(defun rfcview:open-rfc-txt (number file)
+  "Open locally cached txt FILE as RFC NUMBER and return the buffer."
+  (let ((buffer (get-buffer-create (format "*RFC %04d*" number))))
+    (with-current-buffer buffer
+      (insert-file-contents file)
+      (set-buffer-modified-p nil)
+      (rfcview:read-mode))
+    buffer))
+
+(defun rfcview:open-rfc-pdf (number file)
+  "Open locally cached PDF FILE as RFC NUMBER in pdf-view-mode and return the buffer.
+Signals an error if pdf-tools is not installed."
+  (unless (fboundp 'pdf-view-mode)
+    (error "pdf-tools is not installed; install it to view RFC %04d (PDF only)" number))
+  (let* ((buf-name (format "*RFC %04d*" number))
+         (buffer (or (get-buffer buf-name)
+                     (let ((b (find-file-noselect file)))
+                       (with-current-buffer b
+                         (unless (eq major-mode 'pdf-view-mode)
+                           (pdf-view-mode))
+                         (rename-buffer buf-name t))
+                       b))))
+    buffer))
+
+(defun rfcview:download-rfc (number txt-file pdf-file)
+  "Download RFC NUMBER, save to TXT-FILE or PDF-FILE, and return the opened buffer.
+Tries plain-text first; falls back to PDF on a 404 response."
+  (message "Downloading RFC%04d..." number)
+  (let ((txt-buf (rfcview:retrieve-rfc number 'txt)))
+    (if (eql 200 (rfcview:http-response-status txt-buf))
+        (progn
+          (with-current-buffer txt-buf
             (goto-char (point-min))
-            (when (search-forward-regexp "^$" nil t)
+            (when (re-search-forward "^$" nil t)
               (delete-region (point-min) (point)))
-            (write-file filename)
-            (kill-buffer)))
-        (set-buffer buffer)
-        (insert-file-contents filename)
-        (set-buffer-modified-p nil)
-        (rfcview:read-mode)))
+            (write-region (point-min) (point-max) txt-file nil 'silent))
+          (kill-buffer txt-buf)
+          (rfcview:open-rfc-txt number txt-file))
+      (kill-buffer txt-buf)
+      (unless (fboundp 'pdf-view-mode)
+        (error "RFC%04d is not available as plain text and pdf-tools is not installed" number))
+      (message "RFC%04d not found as txt, trying pdf..." number)
+      (let ((pdf-buf (rfcview:retrieve-rfc number 'pdf)))
+        (if (eql 200 (rfcview:http-response-status pdf-buf))
+            (progn
+              (with-current-buffer pdf-buf
+                (goto-char (point-min))
+                (when (re-search-forward "^$" nil t)
+                  (forward-line 1)
+                  (let ((coding-system-for-write 'binary))
+                    (write-region (point) (point-max) pdf-file nil 'silent)))
+                (kill-buffer pdf-buf))
+              (rfcview:open-rfc-pdf number pdf-file))
+          (kill-buffer pdf-buf)
+          (error "RFC%04d is not available (tried txt and pdf)" number))))))
+
+(defun rfcview:read-rfc (number)
+  (let* ((txt-file (format "%srfc%04d.txt" rfcview:local-directory number))
+         (pdf-file (format "%srfc%04d.pdf" rfcview:local-directory number))
+         (buffer (or (get-buffer (format "*RFC %04d*" number))
+                     (cond
+                      ((file-exists-p txt-file) (rfcview:open-rfc-txt number txt-file))
+                      ((file-exists-p pdf-file)  (rfcview:open-rfc-pdf number pdf-file))
+                      (t                          (rfcview:download-rfc number txt-file pdf-file))))))
     (with-selected-window (get-buffer-window "*RFC INDEX*")
       (switch-to-buffer buffer))))
 
