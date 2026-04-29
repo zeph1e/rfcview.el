@@ -12,23 +12,6 @@
 
 ** Installation
 
-*** el-get
-
-The recipe is not yet in the [[https://github.com/dimitri/el-get][el-get]] official repository. Download and copy it into a directory on =el-get-recipe-path=.
-
-Assuming =~/.emacs.d/recipes/= is on =el-get-recipe-path=:
-
-#+BEGIN_SRC sh
-$ wget https://raw.githubusercontent.com/zeph1e/rfcview.el/rfcview.rcp
-$ cp rfcview.rcp ~/.emacs.d/recipes/
-#+END_SRC
-
-Then add to your Emacs init file:
-
-#+BEGIN_SRC emacs-lisp
-(el-get-bundle rfcview)
-#+END_SRC
-
 *** straight.el
 
 #+BEGIN_SRC emacs-lisp
@@ -94,11 +77,30 @@ In an RFC read buffer:
 
 Some RFCs are only published as PDF (e.g. RFC 8).  rfcview automatically falls back to PDF when a plain-text edition returns a 404 response, and also checks for a locally cached =.pdf= file before attempting a download.
 
-Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]].  rfcview does not declare a hard dependency on it; if pdf-tools is not installed, opening a PDF-only RFC signals an error.  An example configuration is provided in =config/pdf.el=:
+Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]].  rfcview does not declare a hard dependency on it; if pdf-tools is not installed, opening a PDF-only RFC signals an error.  Example setups:
 
 #+BEGIN_SRC emacs-lisp
+;; Emacs 30+ (use-package :vc)
+(use-package pdf-tools
+  :vc (:url "https://github.com/vedang/pdf-tools" :rev :newest)
+  :magic ("%PDF" . pdf-view-mode)
+  :config
+  (pdf-tools-install :no-query))
+#+END_SRC
+
+#+BEGIN_SRC emacs-lisp
+;; straight.el
 (use-package pdf-tools
   :straight t
+  :magic ("%PDF" . pdf-view-mode)
+  :config
+  (pdf-tools-install :no-query))
+#+END_SRC
+
+#+BEGIN_SRC emacs-lisp
+;; MELPA (package.el)
+(use-package pdf-tools
+  :ensure t
   :magic ("%PDF" . pdf-view-mode)
   :config
   (pdf-tools-install :no-query))

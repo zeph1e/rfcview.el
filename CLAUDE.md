@@ -14,8 +14,6 @@ Manual load (no package manager needed — all four `.el` files must be on the l
 (autoload 'rfcview "rfcview" t t)
 ```
 
-Via `el-get`: copy `rfcview.rcp` into a directory on `el-get-recipe-path`, then `(el-get-bundle rfcview)`.
-
 Entry point: `M-x rfcview` opens `*RFC INDEX*`.
 
 ## Architecture
