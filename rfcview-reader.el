@@ -27,6 +27,8 @@
      . 'rfcview:rfc-section-face))
   "Font-lock keywords for RFC read mode.")
 
+(defconst rfcview:open-rfc-functions '((txt . rfcview:open-rfc-txt)
+                                       (pdf . rfcview:open-rfc-pdf)))
 (defvar rfcview:read-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "p") 'previous-line)
@@ -140,47 +142,41 @@ Signals an error if pdf-tools is not installed."
                        b))))
     buffer))
 
-(defun rfcview:download-rfc (number txt-file pdf-file)
-  "Download RFC NUMBER, save to TXT-FILE or PDF-FILE, and return the opened buffer.
-Tries plain-text first; falls back to PDF on a 404 response."
-  (message "Downloading RFC%04d..." number)
-  (let ((txt-buf (rfcview:retrieve-rfc number 'txt)))
-    (if (eql 200 (rfcview:http-response-status txt-buf))
-        (progn
-          (with-current-buffer txt-buf
-            (goto-char (point-min))
-            (when (re-search-forward "^$" nil t)
-              (delete-region (point-min) (point)))
-            (write-region (point-min) (point-max) txt-file nil 'silent))
-          (kill-buffer txt-buf)
-          (rfcview:open-rfc-txt number txt-file))
-      (kill-buffer txt-buf)
-      (unless (fboundp 'pdf-view-mode)
-        (error "RFC%04d is not available as plain text and pdf-tools is not installed" number))
-      (message "RFC%04d not found as txt, trying pdf..." number)
-      (let ((pdf-buf (rfcview:retrieve-rfc number 'pdf)))
-        (if (eql 200 (rfcview:http-response-status pdf-buf))
-            (progn
-              (with-current-buffer pdf-buf
-                (goto-char (point-min))
-                (when (re-search-forward "^$" nil t)
-                  (forward-line 1)
-                  (let ((coding-system-for-write 'binary))
-                    (write-region (point) (point-max) pdf-file nil 'silent)))
-                (kill-buffer pdf-buf))
-              (rfcview:open-rfc-pdf number pdf-file))
-          (kill-buffer pdf-buf)
-          (error "RFC%04d is not available (tried txt and pdf)" number))))))
+(defun rfcview:download-rfc (number format to-file)
+  "Download RFC NUMBER, save to TO-FILE, and return the file."
+  (message "Downloading RFC%04d (%s)..." number fmt)
+  (let ((buf (rfcview:retrieve-rfc number fmt)))
+    (when (eql 200 (rfcview:http-response-status buf))
+        (with-current-buffer buf
+          (goto-char (point-min))
+          (when (re-search-forward "^$" nil t)
+            (if (eq fmt 'pdf)
+                (progn (forward-line 1)
+                       (let ((coding-system-for-write 'binary))
+                         (write-region (point) (point-max) to-file nil 'silent)))
+              (delete-region (point-min) (point))
+              (write-region (point-min) (point-max) to-file nil 'silent)))
+          (kill-buffer buf)
+          to-file))))
 
 (defun rfcview:read-rfc (number)
-  (let* ((txt-file (format "%srfc%04d.txt" rfcview:local-directory number))
-         (pdf-file (format "%srfc%04d.pdf" rfcview:local-directory number))
+  (let* ((formats (if (eq rfcview:preferred-format 'pdf) '(pdf txt) '(txt pdf)))
          (buffer (or (get-buffer (format "*RFC %04d*" number))
-                     (cond
-                      ((file-exists-p txt-file) (rfcview:open-rfc-txt number txt-file))
-                      ((file-exists-p pdf-file)  (rfcview:open-rfc-pdf number pdf-file))
-                      (t                          (rfcview:download-rfc number txt-file pdf-file))))))
-    (pop-to-buffer buffer)))
+                     (catch 'found
+                       (dolist (fmt formats)
+                         (let* ((f (format "%srfc%04d.%s"
+                                           rfcview:local-directory number
+                                           (symbol-name fmt)))
+                                (file (if (file-exists-p f) f
+                                        (rfcview:download-rfc number fmt f))))
+                           (when file
+                             (throw 'found
+                                    (let ((open-rfc-fn
+                                           (cdr (assoc fmt rfcview:open-rfc-functions))))
+                                      (message "open-rfc-fn: %S" open-rfc-fn)
+                                      (apply open-rfc-fn `(,number ,file)))))))))))
+    (if buffer (pop-to-buffer buffer)
+      (error "RFC%04d is not available" number))))
 
 (provide 'rfcview-reader)
 ;;; rfcview-reader.el ends here

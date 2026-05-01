@@ -47,6 +47,15 @@
   :type 'integer
   :group 'rfcview)
 
+(defcustom rfcview:preferred-format 'txt
+  "Preferred format for reading RFC documents, either \\='txt or \\='pdf.
+Plain text is tried first when \\='txt; PDF is tried first when \\='pdf.
+The other format is used as a fallback if the preferred one is unavailable.
+PDF viewing requires pdf-tools."
+  :type '(choice (const :tag "Plain text" txt)
+                 (const :tag "PDF" pdf))
+  :group 'rfcview)
+
 (defcustom rfcview:use-face t
   "Whether to use text highlighting or not."
   :type 'boolean
@@ -206,16 +215,13 @@
         context)
     (with-current-buffer (url-retrieve-synchronously encoded-url t)
       (make-local-variable 'url-http-response-status)
-      (let (process)
-        (ignore-errors
-          (setq process (get-buffer-process (current-buffer))))
+      (let ((process (ignore-errors (get-buffer-process (current-buffer)))))
         (if (processp process)
-            (progn
-              (unless (process-live-p process)
-                (process-kill-without-query process)
-                (delete-process process)
-                (error "HTTP error!")))))
-      (current-buffer))))
+            (unless (process-live-p process)
+              (process-kill-without-query process)
+              (delete-process process)
+              (error "HTTP error!"))
+          (current-buffer))))))
 
 (defun rfcview:http-response-status (buffer)
   "Return the HTTP status code from BUFFER as an integer, or nil."
@@ -232,9 +238,8 @@
   (unless (numberp number)
     (error "NUMBER argument is not numeric."))
   (rfcview:retrieve
-   (if (eq format 'pdf)
-       (concat rfcview:rfc-base-url (format "rfc%d.pdf" number))
-     (concat rfcview:rfc-base-url (format "rfc%d.txt" number)))))
+   (concat rfcview:rfc-base-url
+           (format "rfc%d.%s" number (symbol-name (or format 'txt))))))
 
 (defun rfcview:retrieve-index (&optional method)
   "Retrieve the RFC index from the server."
