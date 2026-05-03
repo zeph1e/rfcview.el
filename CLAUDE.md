@@ -32,6 +32,8 @@ rfcview-core.el  ←  rfcview-index.el  ←┐
 
 All `defcustom` declarations (group `rfcview`), all `defface` definitions, and the shared `rfcview:rfc-link-button` button type live here. Core also holds the cache variable `rfcview:rfc-cache` (a plist with `:last-modified`, `:table` hash-table keyed by RFC number, `:favorite`, and `:recent`), network functions (`rfcview:retrieve`, `rfcview:retrieve-rfc`, `rfcview:retrieve-index`), cache persistence (`rfcview:load-cache` / `rfcview:save-cache`), and the text-wrapping utility `rfcview:wrap-text-at-word-boundary`.
 
+`rfcview:preferred-format` (`'txt` or `'pdf`) controls which format is tried first when opening an RFC. Both the local cache lookup and the download fallback respect this order.
+
 ### rfcview-index.el — index mode
 
 **Parsing** — `rfcview:parse-index-entry` / `rfcview:parse-index-buffer` parse the raw IETF rfc-index text into the hash-table stored in `rfcview:rfc-cache`. `rfcview:update-index` orchestrates update: it sends a HEAD request via `rfcview:index-updated-p` and only fetches the full index when `Last-Modified` has advanced.
@@ -44,13 +46,15 @@ Index layout uses Emacs's `word-wrap` mode with `wrap-prefix` text properties (n
 
 ### rfcview-reader.el — RFC document read mode
 
-**Read mode** (`*RFC XXXX*` buffer, `rfcview:read-mode`) — RFC text files are downloaded once and cached locally under `rfcview:local-directory` (`~/.emacs.d/.RFC/`). On load, three post-processing steps run:
+**Read mode** (`*RFC XXXX*` buffer, `rfcview:read-mode`) — RFC files are downloaded once and cached locally under `rfcview:local-directory` (`~/.emacs.d/.RFC/`). Format selection (txt vs pdf) follows `rfcview:preferred-format`; the other format is tried as a fallback. `rfcview:download-rfc` handles a single format and returns `nil` on 404; `rfcview:read-rfc` drives the preference-ordered loop via the `rfcview:open-rfc-functions` alist (`txt → rfcview:open-rfc-txt`, `pdf → rfcview:open-rfc-pdf`).
+
+On load of a text RFC, three post-processing steps run:
 
 - `rfcview:read-hide-page-breaks` — overlays page footer/formfeed/header blocks as invisible so pages flow continuously.
-- `rfcview:read-buttonize-refs` — turns every `RFC XXXX` occurrence into a clickable button that jumps the index to that entry (calls `rfcview:index-goto-number` at runtime).
-- Font-lock highlights numbered section headings (`rfcview:rfc-section-face`).
+- `rfcview:read-buttonize-refs` — turns every `RFC XXXX` and `[RFCXXXX]` occurrence into a clickable button that opens that RFC document.
+- Font-lock highlights section headings (`rfcview:rfc-section-face`): numeric (`1.2.`), alphabetic appendix (`A.1.`), and Roman numeral (`II.`).
 
-Navigation keys: vi-style line/char movement, `/`/`?` for isearch, `]`/`[` for next/previous section heading, `q` to bury.
+Navigation keys: vi-style line/char movement, `/`/`?` for isearch, `]`/`[` for next/previous section heading, `RET` to activate a button, `q` to bury.
 
 ### rfcview.el — entry point
 

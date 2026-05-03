@@ -19,16 +19,18 @@
   :group 'rfcview)
 
 (defconst rfcview:section-heading-regexp
-  "^[0-9]+\\(?:\\.[0-9]+\\)*\\.?[[:space:]]\\{2,\\}[[:upper:]]"
-  "Regexp matching numbered section headings in RFC text.")
+  "^\\(?:[0-9]+\\(?:\\.[0-9]+\\)*\\|[A-Z]+\\(?:\\.[0-9]+\\)*\\)\\.?[[:space:]]\\{2,\\}[[:upper:]]"
+  "Regexp matching section headings in RFC text (numeric, alphabetic, or Roman numeral).")
 
 (defconst rfcview:read-mode-font-lock-keywords
-  `((,(concat "^[0-9]+\\(?:\\.[0-9]+\\)*\\.?[[:space:]]\\{2,\\}[[:upper:]][^\n]*")
+  `((,(concat "^\\(?:[0-9]+\\(?:\\.[0-9]+\\)*\\|[A-Z]+\\(?:\\.[0-9]+\\)*\\)"
+              "\\.?[[:space:]]\\{2,\\}[[:upper:]][^\n]*")
      . 'rfcview:rfc-section-face))
   "Font-lock keywords for RFC read mode.")
 
 (defconst rfcview:open-rfc-functions '((txt . rfcview:open-rfc-txt)
                                        (pdf . rfcview:open-rfc-pdf)))
+
 (defvar rfcview:read-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "p") 'previous-line)
@@ -57,6 +59,7 @@
     (define-key map (kbd "-") 'text-scale-adjust)
     (define-key map (kbd "+") 'text-scale-adjust)
     (define-key map (kbd "=") 'text-scale-adjust)
+    (define-key map (kbd "RET") 'push-button)
     (define-key map (kbd "q") 'bury-buffer)
     map)
   "RFC read mode key map.")
@@ -91,11 +94,13 @@
         (overlay-put ov 'evaporate t)))))
 
 (defun rfcview:read-buttonize-refs ()
-  "Make RFC XXXX cross-references in the buffer clickable."
+  "Make RFC XXXX and [RFCXXXX] cross-references in the buffer clickable."
   (save-excursion
     (goto-char (point-min))
-    (while (re-search-forward "\\bRFC[[:space:]]+\\([0-9]+\\)" nil t)
-      (let* ((num (string-to-number (match-string 1)))
+    (while (re-search-forward
+            "\\(?:\\[RFC\\([0-9]+\\)\\]\\|\\bRFC[[:space:]]+\\([0-9]+\\)\\)"
+            nil t)
+      (let* ((num (string-to-number (or (match-string 1) (match-string 2))))
              (rfc (and rfcview:rfc-cache
                        (hash-table-p (plist-get rfcview:rfc-cache :table))
                        (gethash num (plist-get rfcview:rfc-cache :table)))))
@@ -142,22 +147,25 @@ Signals an error if pdf-tools is not installed."
                        b))))
     buffer))
 
-(defun rfcview:download-rfc (number format to-file)
-  "Download RFC NUMBER, save to TO-FILE, and return the file."
+(defun rfcview:download-rfc (number fmt to-file)
+  "Download RFC NUMBER as FMT format to TO-FILE.  Return TO-FILE on success, nil on 404."
   (message "Downloading RFC%04d (%s)..." number fmt)
   (let ((buf (rfcview:retrieve-rfc number fmt)))
-    (when (eql 200 (rfcview:http-response-status buf))
-        (with-current-buffer buf
-          (goto-char (point-min))
-          (when (re-search-forward "^$" nil t)
-            (if (eq fmt 'pdf)
-                (progn (forward-line 1)
-                       (let ((coding-system-for-write 'binary))
-                         (write-region (point) (point-max) to-file nil 'silent)))
-              (delete-region (point-min) (point))
-              (write-region (point-min) (point-max) to-file nil 'silent)))
-          (kill-buffer buf)
-          to-file))))
+    (if (eql 200 (rfcview:http-response-status buf))
+        (progn
+          (with-current-buffer buf
+            (goto-char (point-min))
+            (when (re-search-forward "^$" nil t)
+              (if (eq fmt 'pdf)
+                  (progn (forward-line 1)
+                         (let ((coding-system-for-write 'binary))
+                           (write-region (point) (point-max) to-file nil 'silent)))
+                (delete-region (point-min) (point))
+                (write-region (point-min) (point-max) to-file nil 'silent)))
+            (kill-buffer buf))
+          to-file)
+      (kill-buffer buf)
+      nil)))
 
 (defun rfcview:read-rfc (number)
   (let* ((formats (if (eq rfcview:preferred-format 'pdf) '(pdf txt) '(txt pdf)))
@@ -171,10 +179,8 @@ Signals an error if pdf-tools is not installed."
                                         (rfcview:download-rfc number fmt f))))
                            (when file
                              (throw 'found
-                                    (let ((open-rfc-fn
-                                           (cdr (assoc fmt rfcview:open-rfc-functions))))
-                                      (message "open-rfc-fn: %S" open-rfc-fn)
-                                      (apply open-rfc-fn `(,number ,file)))))))))))
+                                    (funcall (cdr (assoc fmt rfcview:open-rfc-functions))
+                                             number file)))))))))
     (if buffer (pop-to-buffer buffer)
       (error "RFC%04d is not available" number))))
 

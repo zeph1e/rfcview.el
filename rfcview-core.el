@@ -218,7 +218,7 @@ PDF viewing requires pdf-tools."
       (let ((process (ignore-errors (get-buffer-process (current-buffer)))))
         (if (processp process)
             (unless (process-live-p process)
-              (process-kill-without-query process)
+              (set-process-query-on-exit-flag process nil)
               (delete-process process)
               (error "HTTP error!"))
           (current-buffer))))))
