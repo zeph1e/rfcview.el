@@ -7,7 +7,7 @@
 - Browse the full IETF RFC index with author, date, and cross-reference links
 - Filter by favorites, recently read, or keyword search (scored and ranked)
 - Download and cache RFC documents locally on first access
-- Rich read mode: section-heading highlighting, hidden page headers/footers, clickable =RFC XXXX= cross-references, and section navigation with =[= / =]=
+- Rich read mode: section-heading highlighting, seamless page-break hiding (footer, form feed, running header, and padding lines are all suppressed so the document reads as continuous text), clickable =RFC XXXX= cross-references, and section navigation with =[= / =]=
 - Fast window resize — layout uses Emacs's built-in word-wrap engine, not pre-computed strings
 
 ** Installation

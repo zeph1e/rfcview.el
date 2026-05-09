@@ -61,7 +61,7 @@ Cache is saved to disk via `rfcview:index-cleanup`, which is registered on both 
 
 On load of a text RFC, three post-processing steps run:
 
-- `rfcview:read-hide-page-breaks` — overlays page footer/formfeed/header blocks as invisible so pages flow continuously.
+- `rfcview:read-hide-page-breaks` — hides the full page-break block around each form feed: blank bottom-margin lines, the `[Page N]` footer, the form feed, the running page header, and blank top-margin lines.  When the first visible line after the break is a section heading, a blank line is prepended via a `before-string` overlay for visual separation.
 - `rfcview:read-buttonize-refs` — turns every `RFC XXXX` and `[RFCXXXX]` occurrence into a clickable button that opens that RFC document.
 - Font-lock highlights section headings (`rfcview:rfc-section-face`): numeric (`1.2.`), alphabetic appendix (`A.1.`), and Roman numeral (`II.`).
 
@@ -81,4 +81,8 @@ Requires `rfcview-index` and `rfcview-reader`, then defines the single `;;;###au
 
 ## Known issues
 
-See `TODO.md` for tracked items. Notable open items: RFC title face not applied in reader, TOC entry section jumping not implemented, first line after `^L` (form feed) sometimes erased incorrectly.
+See `TODO.md` for tracked items. Notable open items: RFC title face not applied in reader, TOC entry section jumping not implemented.
+
+### Section heading regexp notes
+
+`rfcview:section-heading-regexp` requires `^\n` (blank line before) and a trailing `\n\n` (blank line after) for the first alternative group.  The trailing blank line is consumed as part of the match — this is intentional to avoid false positives on multi-line list items that begin with a number (`3.  A HOST has to be prepared...`).  Emacs's regexp engine does not support lookahead assertions (`\(?=...\)`), so the blank-line constraint must be expressed by consumption.  Callers that need the heading line itself should use `(nth 1 (split-string (match-string 0) "\n"))` or check `(match-beginning 1)` (group 1 captures the section-number prefix).
