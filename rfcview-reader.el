@@ -19,12 +19,37 @@
   :group 'rfcview)
 
 (defconst rfcview:section-heading-regexp
-  "^\\(?:[0-9]+\\(?:\\.[0-9]+\\)*\\|[A-Z]+\\(?:\\.[0-9]+\\)*\\)\\.?[[:space:]]\\{2,\\}[[:upper:]]"
-  "Regexp matching section headings in RFC text (numeric, alphabetic, or Roman numeral).")
+  (concat
+   ;; All patterns require a preceding blank line (^\n matches an empty line).
+   "^\n"
+   "\\("
+   ;; Numeric with trailing dot: "1.  Title" / "1.1.  Title" / "2.3.10.  Title"
+   "[0-9]+\\.\\(?:[0-9]+\\.\\)*[ \t]+"
+   ;; Numeric without trailing dot: "1 Title" / "1.1 Title" / "3.7 Media Types"
+   "\\|[0-9]+\\(?:\\.[0-9]+\\)*[ \t]+"
+   ;; Appendix (modern): "Appendix A.  Title"
+   "\\|Appendix [A-Z]\\.[ \t]+"
+   ;; Appendix (RFC 791 era, all-caps colon): "APPENDIX A:  Title"
+   "\\|APPENDIX [A-Z]:[ \t]+"
+   ;; Appendix subsection: "A.1.  Title" / "B.10 Title"  (1-2 digit number to avoid X.509 false hits)
+   "\\|[A-Z]\\.[0-9]\\{1,2\\}\\.?[ \t]+"
+   ;; Roman numeral: "I.  Title" / "IV.  Section" / "II. Foo"
+   "\\|[IVX]+\\.?[ \t]+"
+   "\\)"
+   "[A-Z][^\n]*\n"
+   ;; ALL-CAPS bare-word headings (RFC 854/959/1122 era):
+   ;; "INTRODUCTION" / "GENERAL CONSIDERATIONS" / "LINK LAYER REFERENCES"
+   "\\|^\n[A-Z][A-Z ]\\{5,\\}[A-Z]\n"
+   ;; Mixed-case standalone keyword headings
+   "\\|^\nAcknowledgements?[^\n]*\n"
+   "\\|^\nAuthors' Addresses?[^\n]*\n"
+   "\\|^\nAbstract[^\n]*\n"
+   ;; Dash-underline style (RFC 768 era): "Introduction\n------------\n"
+   "\\|^\n[A-Z][a-zA-Z ]+\n-+\n")
+  "Regexp matching RFC section headings across all eras, preceded by a blank line.")
 
 (defconst rfcview:read-mode-font-lock-keywords
-  `((,(concat "^\\(?:[0-9]+\\(?:\\.[0-9]+\\)*\\|[A-Z]+\\(?:\\.[0-9]+\\)*\\)"
-              "\\.?[[:space:]]\\{2,\\}[[:upper:]][^\n]*")
+  `((,rfcview:section-heading-regexp
      . 'rfcview:rfc-section-face))
   "Font-lock keywords for RFC read mode.")
 

@@ -4,17 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-`rfcview.el` is a two-file Emacs package (Elisp) for browsing, downloading, and reading IETF RFC documents inside Emacs. There are no build steps, no test suite, and no external dependencies beyond Emacs's built-in `url` library.
+`rfcview.el` is a four-file Emacs package (Elisp) for browsing, downloading, and reading IETF RFC documents inside Emacs. There are no build steps, no test suite, and no external dependencies beyond Emacs's built-in `url` library.
 
-## Installation / Loading
+## Development
 
-Manual load (no package manager needed — all four `.el` files must be on the load path):
-```emacs-lisp
-(add-to-list 'load-path "~/.emacs.d/rfcview")
-(autoload 'rfcview "rfcview" t t)
+Byte-compile all files to catch errors and warnings:
+```
+emacs -Q --batch -L . -f batch-byte-compile rfcview-core.el rfcview-index.el rfcview-reader.el rfcview.el
 ```
 
-Entry point: `M-x rfcview` opens `*RFC INDEX*`.
+Load interactively for testing (all four files must be on the load path):
+```emacs-lisp
+(add-to-list 'load-path "/path/to/rfcview.el")
+(require 'rfcview)
+```
+
+Entry point: `M-x rfcview` opens `*RFC INDEX*`. Toggle `rfcview:use-debug` to `t` to enable debug messages via `rfcview:debug`.
 
 ## Architecture
 
@@ -30,9 +35,13 @@ rfcview-core.el  ←  rfcview-index.el  ←┐
 
 ### rfcview-core.el — shared data, faces, and network
 
-All `defcustom` declarations (group `rfcview`), all `defface` definitions, and the shared `rfcview:rfc-link-button` button type live here. Core also holds the cache variable `rfcview:rfc-cache` (a plist with `:last-modified`, `:table` hash-table keyed by RFC number, `:favorite`, and `:recent`), network functions (`rfcview:retrieve`, `rfcview:retrieve-rfc`, `rfcview:retrieve-index`), cache persistence (`rfcview:load-cache` / `rfcview:save-cache`), and the text-wrapping utility `rfcview:wrap-text-at-word-boundary`.
+All `defcustom` declarations (group `rfcview`) and most `defface` definitions live here, along with the shared `rfcview:rfc-link-button` button type. Core also holds the cache variable `rfcview:rfc-cache` (a plist with `:last-modified`, `:table` hash-table keyed by RFC number, `:favorite`, and `:recent`), network functions (`rfcview:retrieve`, `rfcview:retrieve-rfc`, `rfcview:retrieve-index`), cache persistence (`rfcview:load-cache` / `rfcview:save-cache`), and the text-wrapping utility `rfcview:wrap-text-at-word-boundary`.
+
+Note: `rfcview:rfc-section-face` is defined in `rfcview-reader.el`, not here — it is reader-specific and not needed in the index.
 
 `rfcview:preferred-format` (`'txt` or `'pdf`) controls which format is tried first when opening an RFC. Both the local cache lookup and the download fallback respect this order.
+
+`rfcview:wrap-text-at-word-boundary` is used only for the filter line in the index (which has mixed propertized strings). Entry text is laid out using Emacs's `word-wrap` mode with `wrap-prefix` text properties instead.
 
 ### rfcview-index.el — index mode
 
@@ -41,6 +50,8 @@ All `defcustom` declarations (group `rfcview`), all `defface` definitions, and t
 **Index mode** (`*RFC INDEX*` buffer, `rfcview:index-mode`) — a read-only buffer rendered by `rfcview:refresh-index`. Each entry is built by `rfcview:make-entry-line` and inserted by `rfcview:insert-with-text-properties`, which also creates clickable buttons for RFC cross-references within traits. Entry navigation uses `rfcview:number` text properties and `paragraph` boundaries. A filter line at the top provides buttons for All / Favorites / Recents / keyword search. The current entry is highlighted with `rfcview:background-highlight-overlay`.
 
 Index layout uses Emacs's `word-wrap` mode with `wrap-prefix` text properties (no literal newlines in entry strings). The date on each entry is right-aligned using a `display (space :align-to ...)` property so layout never depends on window width — `rfcview:refresh-index` is only called when content changes, not on window resize.
+
+Cache is saved to disk via `rfcview:index-cleanup`, which is registered on both `kill-buffer-hook` (buffer-local) and `kill-emacs-hook` so favorites and recents are persisted. The overlay `rfcview:background-highlight-overlay` is a buffer-local variable initialized to `nil` in `rfcview:index-mode` and deleted in `rfcview:index-cleanup`.
 
 **Filters** — `rfcview:index-filter` holds a function symbol (or `nil` for all). The three built-in filter functions (`rfcview:index-filter-function-favorite`, `rfcview:index-filter-function-recent`, `rfcview:index-filter-function-keywords`) return ordered lists of RFC numbers. Keyword search scores titles by regex matches and sorts by score descending, RFC number ascending.
 
@@ -54,7 +65,7 @@ On load of a text RFC, three post-processing steps run:
 - `rfcview:read-buttonize-refs` — turns every `RFC XXXX` and `[RFCXXXX]` occurrence into a clickable button that opens that RFC document.
 - Font-lock highlights section headings (`rfcview:rfc-section-face`): numeric (`1.2.`), alphabetic appendix (`A.1.`), and Roman numeral (`II.`).
 
-Navigation keys: vi-style line/char movement, `/`/`?` for isearch, `]`/`[` for next/previous section heading, `RET` to activate a button, `q` to bury.
+Navigation keys: vi-style line/char movement (`h`/`j`/`k`/`l`), `/`/`?` for isearch, `]`/`[` for next/previous section heading, `RET` to activate a button, `+`/`-`/`=`/`0` for `text-scale-adjust`, `q` to bury.
 
 ### rfcview.el — entry point
 
@@ -66,3 +77,8 @@ Requires `rfcview-index` and `rfcview-reader`, then defines the single `;;;###au
 - User-facing customizations are `defcustom` in the `rfcview` group.
 - Faces are `defface` with support for dark/light backgrounds and degraded color displays.
 - `rfcview:use-debug` / `rfcview:debug` gate any debug output.
+- **Known naming inconsistency**: the index mode hook is `rfcview:index-mode-hook` (colon) but the read mode hook is `rfcview-read-mode-hook` (hyphen). Do not "fix" this without checking existing user configs.
+
+## Known issues
+
+See `TODO.md` for tracked items. Notable open items: RFC title face not applied in reader, TOC entry section jumping not implemented, first line after `^L` (form feed) sometimes erased incorrectly.
