@@ -36,7 +36,7 @@
    ;; Roman numeral: "I.  Title" / "IV.  Section" / "II. Foo"
    "\\|[IVX]+\\.?[ \t]+"
    "\\)"
-   "[A-Z][^\n]*\n"
+   "[A-Z][^,\n]*\n\n"
    ;; ALL-CAPS bare-word headings (RFC 854/959/1122 era):
    ;; "INTRODUCTION" / "GENERAL CONSIDERATIONS" / "LINK LAYER REFERENCES"
    "\\|^\n[A-Z][A-Z ]\\{5,\\}[A-Z]\n"
@@ -110,13 +110,44 @@
       (message "No previous section"))))
 
 (defun rfcview:read-hide-page-breaks ()
-  "Hide RFC page footer/header lines surrounding each form feed."
+  "Hide RFC page footers, form feeds, page headers, and surrounding blank lines.
+Each page break block is: blank padding lines, footer ([Page N]), form feed,
+page header, blank padding lines.  All of that is replaced by nothing."
   (save-excursion
     (goto-char (point-min))
-    (while (re-search-forward "^[^\n]*\\[Page [0-9]+\\]\n\f\n[^\n]*\n" nil t)
-      (let ((ov (make-overlay (match-beginning 0) (match-end 0))))
-        (overlay-put ov 'invisible t)
-        (overlay-put ov 'evaporate t)))))
+    (while (search-forward "\f" nil t)
+      (let* ((ff-pos (1- (point)))
+             (footer-bol (save-excursion
+                           (goto-char ff-pos)
+                           (forward-line -1)
+                           (point))))
+        (when (save-excursion
+                (goto-char footer-bol)
+                (looking-at ".*\\[Page [0-9]+\\]"))
+          (let* ((start (save-excursion
+                          (goto-char footer-bol)
+                          (if (re-search-backward "[^ \t\n]" nil t)
+                              (progn (forward-line 1) (point))
+                            (point-min))))
+                 (end (save-excursion
+                        (goto-char ff-pos)
+                        (forward-line 2)      ; skip FF line and header line
+                        (while (and (not (eobp))
+                                    (looking-at "^[ \t]*$"))
+                          (forward-line 1))
+                        (point))))
+            (when (< start end)
+              (let ((ov (make-overlay start end)))
+                (overlay-put ov 'invisible t)
+                (overlay-put ov 'evaporate t))
+              (when (and (< end (point-max))
+                         (save-excursion
+                           (goto-char (1- end))
+                           (looking-at rfcview:section-heading-regexp)))
+                (let ((sep (make-overlay end end)))
+                  (overlay-put sep 'before-string "\n"))))))))))
+
+
 
 (defun rfcview:read-buttonize-refs ()
   "Make RFC XXXX and [RFCXXXX] cross-references in the buffer clickable."
