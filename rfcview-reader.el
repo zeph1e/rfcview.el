@@ -9,6 +9,12 @@
 
 (require 'rfcview-core)
 
+(defvar-local rfcview:read-source-file nil
+  "Path to the cached txt file backing the current RFC read buffer.")
+
+(defvar-local rfcview:read-rfc-number 0
+  "Number of RFC currently reading.")
+
 (defface rfcview:rfc-section-face
   '((((class color) (min-colors 88) (background dark))
      (:foreground "white" :weight bold))
@@ -31,7 +37,7 @@
    ;; Roman numeral: "I.  Title" / "IV.  Section" / "II. Foo"
    "\\|[IVX]+\\.?[ \t]+"
    "\\)"
-   "[A-Z][^,\n]*\n\n"
+   "[A-Z(\"][^,\n]*\n\n"
    ;; Appendix headings are unambiguous so only the first line is matched;
    ;; this handles titles that wrap to a second indented continuation line.
    ;; Appendix (modern): "Appendix A.  Title (possibly wrapped)"
@@ -48,7 +54,7 @@
    "\\|^\nAuthors' Addresses?[^\n]*\n"
    "\\|^\nAbstract[^\n]*\n"
    ;; Dash-underline style (RFC 768 era): "Introduction\n------------\n"
-   "\\|^\n[A-Z][a-zA-Z ]+\n-+\n")
+   "\\|^\n[A-Z][a-zA-Z ]+\n[[:space:]]*-\\{3,\\}\n")
   "Regexp matching RFC section headings across all eras, preceded by a blank line.")
 
 (defun rfcview:section-heading-search (bound)
@@ -129,6 +135,46 @@ References\" cause the second heading to be missed."
         (forward-line 1)
       (goto-char orig)
       (message "No previous section"))))
+
+(defun rfcview:read-fontify ()
+  "Apply faces to RFC header (traits), title, and section headings via text properties."
+  (with-silent-modifications
+    (save-excursion
+      ;; Header block: from start to the first blank line
+      (goto-char (point-min))
+      (let ((header-end (if (re-search-forward "^[ \t]*$" nil t)
+                            (line-beginning-position)
+                          (point-max))))
+        (put-text-property (point-min) header-end 'face 'rfcview:rfc-traits-face))
+      ;; Title: first block of indented (centered) non-blank lines after the header gap
+      (goto-char (point-min))
+      (when (re-search-forward "^[ \t]*$" nil t)
+        (forward-line 1)
+        (while (and (not (eobp)) (looking-at "^[ \t]*$"))
+          (forward-line 1))
+        (let ((title-start (point))
+              (title-end (point)))
+          (while (and (not (eobp))
+                      (not (looking-at "^[ \t]*$"))
+                      (looking-at "^[[:space:]]+[^[:space:]]"))
+            (forward-line 1)
+            (setq title-end (point)))
+          (when (< title-start title-end)
+            (put-text-property title-start title-end 'face 'rfcview:rfc-title-face))))
+      ;; Section headings: apply face to the heading line only (not surrounding blanks)
+      (goto-char (point-min))
+      (while (re-search-forward rfcview:section-heading-regexp nil t)
+        (let* ((line-start (1+ (match-beginning 0)))
+               (line-end (save-excursion
+                           (goto-char line-start)
+                           (line-end-position))))
+          (put-text-property line-start line-end 'face 'rfcview:rfc-section-face)
+          ;; Back up one char when the match consumed a trailing blank line so
+          ;; it remains available as the leading blank for the next heading match.
+          (when (and (>= (point) 2)
+                     (eq (char-before (point)) ?\n)
+                     (eq (char-before (1- (point))) ?\n))
+            (goto-char (1- (point)))))))))
 
 (defun rfcview:read-hide-page-breaks ()
   "Hide RFC page footers, form feeds, page headers, and surrounding blank lines.
@@ -212,17 +258,15 @@ line from the top margin is left visible so navigation works correctly."
   (setq mode-name "RFC"
         major-mode 'rfcview:read-mode
         buffer-read-only t)
-  (setq-local font-lock-multiline t)
-  (setq font-lock-defaults '((rfcview:read-mode-font-lock-keywords) t))
-  (font-lock-mode 1)
-  (font-lock-ensure)
+  ;; (setq-local font-lock-multiline t)
+  ;; (setq font-lock-defaults '((rfcview:read-mode-font-lock-keywords) t))
+  ;; (font-lock-mode 1)
+  ;; (font-lock-ensure)
+  (rfcview:read-fontify)
   (rfcview:read-trim-leading-blanks)
   (rfcview:read-hide-page-breaks)
   (rfcview:read-buttonize-refs)
   (run-hooks 'rfcview-read-mode-hook))
-
-(defvar-local rfcview:read-source-file nil
-  "Path to the cached txt file backing the current RFC read buffer.")
 
 (defun rfcview:read-view-original ()
   "Open the raw cached txt file for this RFC in text-mode."
@@ -240,7 +284,10 @@ line from the top margin is left visible so navigation works correctly."
       (insert-file-contents file)
       (set-buffer-modified-p nil)
       (rfcview:read-mode)
-      (setq rfcview:read-source-file file))
+      ;; Set after rfcview:read-mode: kill-all-local-variables runs first in the mode
+      ;; function and would clear any values set before the call.
+      (setq rfcview:read-source-file file
+            rfcview:read-rfc-number number))
     buffer))
 
 (defun rfcview:open-rfc-pdf (number file)

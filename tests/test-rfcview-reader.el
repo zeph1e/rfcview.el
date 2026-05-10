@@ -17,6 +17,36 @@
                     (with-current-buffer buf
                       (overlays-in (point-min) (point-max)))))
 
+(defun rfcview-test:face-at-string (text)
+  "Return the face text property at the first occurrence of TEXT in current buffer."
+  (save-excursion
+    (goto-char (point-min))
+    (when (search-forward text nil t)
+      (get-text-property (match-beginning 0) 'face))))
+
+(defun rfcview-test:make-structured-rfc ()
+  "Return RFC-structured text with a header block, centered title, and sections."
+  (concat "Network Working Group                                   J. Author\n"
+          "Request for Comments: 9999                           Some Corp.\n"
+          "Category: Standards Track                           January 2024\n"
+          "\n"
+          "\n"
+          "                       A Sample Protocol\n"
+          "\n"
+          "Abstract\n"
+          "\n"
+          "   This is the abstract.\n"
+          "\n"
+          "1.  Introduction\n"
+          "\n"
+          "   This is the introduction.\n"
+          "\n"
+          "8.  References\n"
+          "\n"
+          "8.1.  Normative References\n"
+          "\n"
+          "   [RFC793]\n"))
+
 ;;; ─── rfcview:section-heading-regexp ─────────────────────────────────────────
 
 (ert-deftest rfcview:test-section-heading-regexp-numeric-trailing-dot ()
@@ -138,6 +168,101 @@ also match — this test documents the case-sensitive-only behavior."
            (second (rfcview:section-heading-search bound)))
       (should first)
       (should-not second))))
+
+;;; ─── rfcview:read-fontify ────────────────────────────────────────────────────
+
+(ert-deftest rfcview:test-read-fontify-header-gets-traits-face ()
+  "The header block (before first blank line) gets rfcview:rfc-traits-face."
+  (with-temp-buffer
+    (insert (rfcview-test:make-structured-rfc))
+    (rfcview:read-fontify)
+    (should (eq 'rfcview:rfc-traits-face
+                (rfcview-test:face-at-string "Network Working Group")))))
+
+(ert-deftest rfcview:test-read-fontify-traits-face-ends-at-first-blank ()
+  "Traits face does not extend past the first blank line into the title."
+  (with-temp-buffer
+    (insert (rfcview-test:make-structured-rfc))
+    (rfcview:read-fontify)
+    (should-not (eq 'rfcview:rfc-traits-face
+                    (rfcview-test:face-at-string "A Sample Protocol")))))
+
+(ert-deftest rfcview:test-read-fontify-title-gets-title-face ()
+  "Space-indented lines after the header gap get rfcview:rfc-title-face."
+  (with-temp-buffer
+    (insert (rfcview-test:make-structured-rfc))
+    (rfcview:read-fontify)
+    (should (eq 'rfcview:rfc-title-face
+                (rfcview-test:face-at-string "A Sample Protocol")))))
+
+(ert-deftest rfcview:test-read-fontify-no-title-when-non-indented ()
+  "Non-indented text after the header gap does not get rfcview:rfc-title-face."
+  (with-temp-buffer
+    (insert (concat "Author: J. Doe\n"
+                    "\n"
+                    "Non-indented line\n"
+                    "\n"
+                    "1.  Body\n"
+                    "\n"
+                    "Content.\n"))
+    (rfcview:read-fontify)
+    (should-not (eq 'rfcview:rfc-title-face
+                    (rfcview-test:face-at-string "Non-indented line")))))
+
+(ert-deftest rfcview:test-read-fontify-numeric-section-gets-section-face ()
+  "Numeric section headings get rfcview:rfc-section-face."
+  (with-temp-buffer
+    (insert (rfcview-test:make-structured-rfc))
+    (rfcview:read-fontify)
+    (should (eq 'rfcview:rfc-section-face
+                (rfcview-test:face-at-string "1.  Introduction")))))
+
+(ert-deftest rfcview:test-read-fontify-keyword-heading-gets-section-face ()
+  "Keyword headings like Abstract get rfcview:rfc-section-face."
+  (with-temp-buffer
+    (insert (rfcview-test:make-structured-rfc))
+    (rfcview:read-fontify)
+    (should (eq 'rfcview:rfc-section-face
+                (rfcview-test:face-at-string "Abstract")))))
+
+(ert-deftest rfcview:test-read-fontify-all-caps-heading-gets-section-face ()
+  "ALL-CAPS bare-word headings get rfcview:rfc-section-face."
+  (with-temp-buffer
+    (insert "\nINTRODUCTION\n\nSome prose.\n")
+    (rfcview:read-fontify)
+    (should (eq 'rfcview:rfc-section-face
+                (rfcview-test:face-at-string "INTRODUCTION")))))
+
+(ert-deftest rfcview:test-read-fontify-adjacent-sections-both-get-face ()
+  "Adjacent headings 8. and 8.1. both get rfcview:rfc-section-face."
+  (with-temp-buffer
+    (insert (rfcview-test:make-structured-rfc))
+    (rfcview:read-fontify)
+    (should (eq 'rfcview:rfc-section-face
+                (rfcview-test:face-at-string "8.  References")))
+    (should (eq 'rfcview:rfc-section-face
+                (rfcview-test:face-at-string "8.1.  Normative References")))))
+
+(ert-deftest rfcview:test-read-fontify-body-text-has-no-fontify-face ()
+  "Body paragraph text does not get any of the rfcview fontify faces."
+  (with-temp-buffer
+    (insert (rfcview-test:make-structured-rfc))
+    (rfcview:read-fontify)
+    (let ((face (rfcview-test:face-at-string "This is the introduction")))
+      (should-not (memq face '(rfcview:rfc-traits-face
+                               rfcview:rfc-title-face
+                               rfcview:rfc-section-face))))))
+
+(ert-deftest rfcview:test-read-fontify-works-in-read-only-buffer ()
+  "rfcview:read-fontify applies text properties even in a read-only buffer."
+  (with-temp-buffer
+    (insert (rfcview-test:make-structured-rfc))
+    (setq buffer-read-only t)
+    (unwind-protect
+        (should-not (condition-case _
+                        (progn (rfcview:read-fontify) nil)
+                      (buffer-read-only t)))
+      (setq buffer-read-only nil))))
 
 ;;; ─── rfcview:read-trim-leading-blanks ────────────────────────────────────────
 
@@ -442,6 +567,19 @@ one blank line is left visible (overlay ends before it)."
             (unwind-protect
                 (with-current-buffer buf
                   (should (string= tmp rfcview:read-source-file)))
+              (kill-buffer buf))))
+      (delete-file tmp))))
+
+(ert-deftest rfcview:test-open-rfc-txt-sets-read-rfc-number ()
+  "open-rfc-txt stores the RFC number in rfcview:read-rfc-number."
+  (let ((tmp (make-temp-file "rfcview-test-" nil ".txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp (insert "Content.\n"))
+          (let ((buf (rfcview:open-rfc-txt 4 tmp)))
+            (unwind-protect
+                (with-current-buffer buf
+                  (should (= 4 rfcview:read-rfc-number)))
               (kill-buffer buf))))
       (delete-file tmp))))
 
