@@ -20,23 +20,26 @@
 
 (defconst rfcview:section-heading-regexp
   (concat
-   ;; All patterns require a preceding blank line (^\n matches an empty line).
+   ;; Numeric headings require a trailing blank line (\n\n) to reject multi-line
+   ;; list items that start with a number (e.g. "3.  A HOST has to be...").
    "^\n"
    "\\("
    ;; Numeric with trailing dot: "1.  Title" / "1.1.  Title" / "2.3.10.  Title"
    "[0-9]+\\.\\(?:[0-9]+\\.\\)*[ \t]+"
    ;; Numeric without trailing dot: "1 Title" / "1.1 Title" / "3.7 Media Types"
    "\\|[0-9]+\\(?:\\.[0-9]+\\)*[ \t]+"
-   ;; Appendix (modern): "Appendix A.  Title"
-   "\\|Appendix [A-Z]\\.[ \t]+"
-   ;; Appendix (RFC 791 era, all-caps colon): "APPENDIX A:  Title"
-   "\\|APPENDIX [A-Z]:[ \t]+"
-   ;; Appendix subsection: "A.1.  Title" / "B.10 Title"  (1-2 digit number to avoid X.509 false hits)
-   "\\|[A-Z]\\.[0-9]\\{1,2\\}\\.?[ \t]+"
    ;; Roman numeral: "I.  Title" / "IV.  Section" / "II. Foo"
    "\\|[IVX]+\\.?[ \t]+"
    "\\)"
    "[A-Z][^,\n]*\n\n"
+   ;; Appendix headings are unambiguous so only the first line is matched;
+   ;; this handles titles that wrap to a second indented continuation line.
+   ;; Appendix (modern): "Appendix A.  Title (possibly wrapped)"
+   "\\|^\nAppendix [A-Z]\\.[ \t]+[A-Z][^\n]*\n"
+   ;; Appendix (RFC 791 era, all-caps colon): "APPENDIX A:  Title"
+   "\\|^\nAPPENDIX [A-Z]:[ \t]+[A-Z][^\n]*\n"
+   ;; Appendix subsection: "A.1.  Title" / "B.10 Title"  (1-2 digit number to avoid X.509 false hits)
+   "\\|^\n[A-Z]\\.[0-9]\\{1,2\\}\\.?[ \t]+[A-Z][^\n]*\n"
    ;; ALL-CAPS bare-word headings (RFC 854/959/1122 era):
    ;; "INTRODUCTION" / "GENERAL CONSIDERATIONS" / "LINK LAYER REFERENCES"
    "\\|^\n[A-Z][A-Z ]\\{5,\\}[A-Z]\n"
@@ -48,9 +51,25 @@
    "\\|^\n[A-Z][a-zA-Z ]+\n-+\n")
   "Regexp matching RFC section headings across all eras, preceded by a blank line.")
 
+(defun rfcview:section-heading-search (bound)
+  "Font-lock search function for section headings.
+After a match that ends with \\n\\n (trailing blank line consumed), backs up
+by one so the blank line is available as the leading blank for the next heading.
+Without this, adjacent headings like \"8.  References\" / \"8.1.  Normative
+References\" cause the second heading to be missed."
+  (when (re-search-forward rfcview:section-heading-regexp bound t)
+    (when (and (>= (match-end 0) 2)
+               (eq (char-before (match-end 0)) ?\n)
+               (eq (char-before (1- (match-end 0))) ?\n))
+      (goto-char (1- (match-end 0)))
+      (let ((md (match-data)))
+        (setcar (nthcdr 1 md) (point))
+        (set-match-data md)))
+    t))
+
 (defconst rfcview:read-mode-font-lock-keywords
-  `((,rfcview:section-heading-regexp
-     . 'rfcview:rfc-section-face))
+  '((rfcview:section-heading-search
+     (0 'rfcview:rfc-section-face t)))
   "Font-lock keywords for RFC read mode.")
 
 (defconst rfcview:open-rfc-functions '((txt . rfcview:open-rfc-txt)
@@ -96,7 +115,8 @@
   (let ((orig (point)))
     (end-of-line)
     (if (re-search-forward rfcview:section-heading-regexp nil t)
-        (beginning-of-line)
+        (progn (goto-char (match-beginning 0))
+               (forward-line 1))
       (goto-char orig)
       (message "No next section"))))
 
@@ -106,7 +126,7 @@
   (let ((orig (point)))
     (beginning-of-line)
     (if (re-search-backward rfcview:section-heading-regexp nil t)
-        (beginning-of-line)
+        (forward-line 1)
       (goto-char orig)
       (message "No previous section"))))
 
@@ -192,8 +212,10 @@ line from the top margin is left visible so navigation works correctly."
   (setq mode-name "RFC"
         major-mode 'rfcview:read-mode
         buffer-read-only t)
+  (setq-local font-lock-multiline t)
   (setq font-lock-defaults '((rfcview:read-mode-font-lock-keywords) t))
   (font-lock-mode 1)
+  (font-lock-ensure)
   (rfcview:read-trim-leading-blanks)
   (rfcview:read-hide-page-breaks)
   (rfcview:read-buttonize-refs)
