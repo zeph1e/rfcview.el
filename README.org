@@ -12,11 +12,12 @@
 
 ** Installation
 
-*** straight.el
+*** use-package :vc (Emacs 30+)
 
 #+BEGIN_SRC emacs-lisp
-(straight-use-package
- '(rfcview :host github :repo "zeph1e/rfcview.el" :files ("*.el")))
+(use-package rfcview
+  :vc (:url "https://github.com/zeph1e/rfcview.el" :rev :newest)
+  :commands rfcview)
 #+END_SRC
 
 *** use-package with straight.el
@@ -27,12 +28,11 @@
   :commands rfcview)
 #+END_SRC
 
-*** use-package :vc (Emacs 30+)
+*** straight.el
 
 #+BEGIN_SRC emacs-lisp
-(use-package rfcview
-  :vc (:url "https://github.com/zeph1e/rfcview.el" :rev :newest)
-  :commands rfcview)
+(straight-use-package
+ '(rfcview :host github :repo "zeph1e/rfcview.el" :files ("*.el")))
 #+END_SRC
 
 *** Manual
@@ -76,6 +76,12 @@ In an RFC read buffer:
 ** PDF support
 
 Some RFCs are only published as PDF (e.g. RFC 8).  rfcview automatically falls back to PDF when a plain-text edition returns a 404 response, and also checks for a locally cached =.pdf= file before attempting a download.
+
+To always open RFCs as PDF (even when a plain-text edition exists), set =rfcview:preferred-format=:
+
+#+BEGIN_SRC emacs-lisp
+(setq rfcview:preferred-format 'pdf)
+#+END_SRC
 
 Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]].  rfcview does not declare a hard dependency on it; if pdf-tools is not installed, opening a PDF-only RFC signals an error.  Example setups:
 

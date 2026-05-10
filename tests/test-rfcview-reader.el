@@ -172,31 +172,31 @@ also match — this test documents the case-sensitive-only behavior."
 ;;; ─── rfcview:read-fontify ────────────────────────────────────────────────────
 
 (ert-deftest rfcview:test-read-fontify-header-gets-traits-face ()
-  "The header block (before first blank line) gets rfcview:rfc-traits-face."
+  "The header block (before first blank line) gets rfcview:read-rfc-header-face."
   (with-temp-buffer
     (insert (rfcview-test:make-structured-rfc))
     (rfcview:read-fontify)
-    (should (eq 'rfcview:rfc-traits-face
+    (should (eq 'rfcview:read-rfc-header-face
                 (rfcview-test:face-at-string "Network Working Group")))))
 
 (ert-deftest rfcview:test-read-fontify-traits-face-ends-at-first-blank ()
-  "Traits face does not extend past the first blank line into the title."
+  "Header face does not extend past the first blank line into the title."
   (with-temp-buffer
     (insert (rfcview-test:make-structured-rfc))
     (rfcview:read-fontify)
-    (should-not (eq 'rfcview:rfc-traits-face
+    (should-not (eq 'rfcview:read-rfc-header-face
                     (rfcview-test:face-at-string "A Sample Protocol")))))
 
 (ert-deftest rfcview:test-read-fontify-title-gets-title-face ()
-  "Space-indented lines after the header gap get rfcview:rfc-title-face."
+  "Space-indented lines after the header gap get rfcview:read-rfc-title-face."
   (with-temp-buffer
     (insert (rfcview-test:make-structured-rfc))
     (rfcview:read-fontify)
-    (should (eq 'rfcview:rfc-title-face
+    (should (eq 'rfcview:read-rfc-title-face
                 (rfcview-test:face-at-string "A Sample Protocol")))))
 
 (ert-deftest rfcview:test-read-fontify-no-title-when-non-indented ()
-  "Non-indented text after the header gap does not get rfcview:rfc-title-face."
+  "Non-indented text after the header gap does not get rfcview:read-rfc-title-face."
   (with-temp-buffer
     (insert (concat "Author: J. Doe\n"
                     "\n"
@@ -206,41 +206,46 @@ also match — this test documents the case-sensitive-only behavior."
                     "\n"
                     "Content.\n"))
     (rfcview:read-fontify)
-    (should-not (eq 'rfcview:rfc-title-face
+    (should-not (eq 'rfcview:read-rfc-title-face
                     (rfcview-test:face-at-string "Non-indented line")))))
 
 (ert-deftest rfcview:test-read-fontify-numeric-section-gets-section-face ()
-  "Numeric section headings get rfcview:rfc-section-face."
+  "Numeric section headings get rfcview:read-rfc-section-face."
   (with-temp-buffer
     (insert (rfcview-test:make-structured-rfc))
     (rfcview:read-fontify)
-    (should (eq 'rfcview:rfc-section-face
+    (should (eq 'rfcview:read-rfc-section-face
                 (rfcview-test:face-at-string "1.  Introduction")))))
 
 (ert-deftest rfcview:test-read-fontify-keyword-heading-gets-section-face ()
-  "Keyword headings like Abstract get rfcview:rfc-section-face."
+  "Keyword headings like Abstract get rfcview:read-rfc-section-face."
   (with-temp-buffer
     (insert (rfcview-test:make-structured-rfc))
     (rfcview:read-fontify)
-    (should (eq 'rfcview:rfc-section-face
+    (should (eq 'rfcview:read-rfc-section-face
                 (rfcview-test:face-at-string "Abstract")))))
 
 (ert-deftest rfcview:test-read-fontify-all-caps-heading-gets-section-face ()
-  "ALL-CAPS bare-word headings get rfcview:rfc-section-face."
+  "ALL-CAPS bare-word headings get rfcview:read-rfc-section-face."
   (with-temp-buffer
-    (insert "\nINTRODUCTION\n\nSome prose.\n")
+    (insert (concat "Network Working Group\n"
+                    "\n"
+                    "\n"
+                    "                       Old-Style RFC\n"
+                    "\n"
+                    "\nINTRODUCTION\n\nSome prose.\n"))
     (rfcview:read-fontify)
-    (should (eq 'rfcview:rfc-section-face
+    (should (eq 'rfcview:read-rfc-section-face
                 (rfcview-test:face-at-string "INTRODUCTION")))))
 
 (ert-deftest rfcview:test-read-fontify-adjacent-sections-both-get-face ()
-  "Adjacent headings 8. and 8.1. both get rfcview:rfc-section-face."
+  "Adjacent headings 8. and 8.1. both get rfcview:read-rfc-section-face."
   (with-temp-buffer
     (insert (rfcview-test:make-structured-rfc))
     (rfcview:read-fontify)
-    (should (eq 'rfcview:rfc-section-face
+    (should (eq 'rfcview:read-rfc-section-face
                 (rfcview-test:face-at-string "8.  References")))
-    (should (eq 'rfcview:rfc-section-face
+    (should (eq 'rfcview:read-rfc-section-face
                 (rfcview-test:face-at-string "8.1.  Normative References")))))
 
 (ert-deftest rfcview:test-read-fontify-body-text-has-no-fontify-face ()
@@ -249,9 +254,9 @@ also match — this test documents the case-sensitive-only behavior."
     (insert (rfcview-test:make-structured-rfc))
     (rfcview:read-fontify)
     (let ((face (rfcview-test:face-at-string "This is the introduction")))
-      (should-not (memq face '(rfcview:rfc-traits-face
-                               rfcview:rfc-title-face
-                               rfcview:rfc-section-face))))))
+      (should-not (memq face '(rfcview:read-rfc-header-face
+                               rfcview:read-rfc-title-face
+                               rfcview:read-rfc-section-face))))))
 
 (ert-deftest rfcview:test-read-fontify-works-in-read-only-buffer ()
   "rfcview:read-fontify applies text properties even in a read-only buffer."

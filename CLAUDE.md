@@ -37,7 +37,7 @@ rfcview-core.el  ←  rfcview-index.el  ←┐
 
 All `defcustom` declarations (group `rfcview`) and most `defface` definitions live here, along with the shared `rfcview:rfc-link-button` button type. Core also holds the cache variable `rfcview:rfc-cache` (a plist with `:last-modified`, `:table` hash-table keyed by RFC number, `:favorite`, and `:recent`), network functions (`rfcview:retrieve`, `rfcview:retrieve-rfc`, `rfcview:retrieve-index`), cache persistence (`rfcview:load-cache` / `rfcview:save-cache`), and the text-wrapping utility `rfcview:wrap-text-at-word-boundary`.
 
-Note: `rfcview:rfc-section-face` is defined in `rfcview-reader.el`, not here — it is reader-specific and not needed in the index.
+Note: `rfcview:read-rfc-header-face`, `rfcview:read-rfc-title-face`, and `rfcview:read-rfc-section-face` are defined in `rfcview-reader.el`, not here — they are reader-specific and not needed in the index.
 
 `rfcview:preferred-format` (`'txt` or `'pdf`) controls which format is tried first when opening an RFC. Both the local cache lookup and the download fallback respect this order.
 
@@ -59,11 +59,12 @@ Cache is saved to disk via `rfcview:index-cleanup`, which is registered on both 
 
 **Read mode** (`*RFC XXXX*` buffer, `rfcview:read-mode`) — RFC files are downloaded once and cached locally under `rfcview:local-directory` (`~/.emacs.d/.RFC/`). Format selection (txt vs pdf) follows `rfcview:preferred-format`; the other format is tried as a fallback. `rfcview:download-rfc` handles a single format and returns `nil` on 404; `rfcview:read-rfc` drives the preference-ordered loop via the `rfcview:open-rfc-functions` alist (`txt → rfcview:open-rfc-txt`, `pdf → rfcview:open-rfc-pdf`).
 
-On load of a text RFC, three post-processing steps run:
+On load of a text RFC, four post-processing steps run:
 
+- `rfcview:read-fontify` — applies faces via `put-text-property`: `rfcview:read-rfc-header-face` to the header block (network info, category, date), `rfcview:read-rfc-title-face` to the centered title, and `rfcview:read-rfc-section-face` to section headings: numeric (`1.2.`), alphabetic appendix (`A.1.`), Roman numeral (`II.`), ALL-CAPS, and keyword headings.
 - `rfcview:read-hide-page-breaks` — hides the full page-break block around each form feed: blank bottom-margin lines, the `[Page N]` footer, the form feed, the running page header, and blank top-margin lines.  When the first visible line after the break is a section heading, a blank line is prepended via a `before-string` overlay for visual separation.
 - `rfcview:read-buttonize-refs` — turns every `RFC XXXX` and `[RFCXXXX]` occurrence into a clickable button that opens that RFC document.
-- Font-lock highlights section headings (`rfcview:rfc-section-face`): numeric (`1.2.`), alphabetic appendix (`A.1.`), and Roman numeral (`II.`).
+- `rfcview:read-trim-leading-blanks` — hides blank lines at the very start of the buffer.
 
 Navigation keys: vi-style line/char movement (`h`/`j`/`k`/`l`), `/`/`?` for isearch, `]`/`[` for next/previous section heading, `RET` to activate a button, `+`/`-`/`=`/`0` for `text-scale-adjust`, `q` to bury.
 
@@ -81,7 +82,7 @@ Requires `rfcview-index` and `rfcview-reader`, then defines the single `;;;###au
 
 ## Known issues
 
-See `TODO.md` for tracked items. Notable open items: RFC title face not applied in reader, TOC entry section jumping not implemented.
+See `TODO.md` for tracked items. Notable open items: TOC entry section jumping not implemented.
 
 ### Section heading regexp notes
 

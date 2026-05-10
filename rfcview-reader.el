@@ -15,13 +15,31 @@
 (defvar-local rfcview:read-rfc-number 0
   "Number of RFC currently reading.")
 
-(defface rfcview:rfc-section-face
+(defface rfcview:read-rfc-header-face
+  '((((class color) (min-colors 88) (background dark))
+     (:foreground "dim grey"))
+    (((class color) (min-colors 88) (background light))
+     (:foreground "dark grey"))
+    (t (:bold t)))
+  "Face for the RFC header block (network info, category, date)."
+  :group 'rfcview)
+
+(defface rfcview:read-rfc-title-face
   '((((class color) (min-colors 88) (background dark))
      (:foreground "white" :weight bold))
     (((class color) (min-colors 88) (background light))
      (:foreground "black" :weight bold))
     (t (:bold t)))
-  "Face used to highlight section headings in RFC read mode."
+  "Face for the RFC document title."
+  :group 'rfcview)
+
+(defface rfcview:read-rfc-section-face
+  '((((class color) (min-colors 88) (background dark))
+     (:weight bold))
+    (((class color) (min-colors 88) (background light))
+     (:weight bold))
+    (t (:bold t)))
+  "Face for section headings in RFC read mode."
   :group 'rfcview)
 
 (defconst rfcview:section-heading-regexp
@@ -72,11 +90,6 @@ References\" cause the second heading to be missed."
         (setcar (nthcdr 1 md) (point))
         (set-match-data md)))
     t))
-
-(defconst rfcview:read-mode-font-lock-keywords
-  '((rfcview:section-heading-search
-     (0 'rfcview:rfc-section-face t)))
-  "Font-lock keywords for RFC read mode.")
 
 (defconst rfcview:open-rfc-functions '((txt . rfcview:open-rfc-txt)
                                        (pdf . rfcview:open-rfc-pdf)))
@@ -137,38 +150,38 @@ References\" cause the second heading to be missed."
       (message "No previous section"))))
 
 (defun rfcview:read-fontify ()
-  "Apply faces to RFC header (traits), title, and section headings via text properties."
+  "Apply faces to RFC header, title, and section headings via text properties."
   (with-silent-modifications
     (save-excursion
       ;; Header block: from start to the first blank line
       (goto-char (point-min))
-      (let ((header-end (if (re-search-forward "^[ \t]*$" nil t)
+      (let ((header-start (if (re-search-forward "^[^\n]+$" nil t)
+                              (line-beginning-position)
+                            (point-min)))
+            (header-end (if (re-search-forward "^[ \t]*$" nil t)
                             (line-beginning-position)
                           (point-max))))
-        (put-text-property (point-min) header-end 'face 'rfcview:rfc-traits-face))
+        (put-text-property header-start header-end 'face 'rfcview:read-rfc-header-face))
       ;; Title: first block of indented (centered) non-blank lines after the header gap
-      (goto-char (point-min))
-      (when (re-search-forward "^[ \t]*$" nil t)
-        (forward-line 1)
-        (while (and (not (eobp)) (looking-at "^[ \t]*$"))
-          (forward-line 1))
-        (let ((title-start (point))
-              (title-end (point)))
-          (while (and (not (eobp))
-                      (not (looking-at "^[ \t]*$"))
-                      (looking-at "^[[:space:]]+[^[:space:]]"))
-            (forward-line 1)
-            (setq title-end (point)))
-          (when (< title-start title-end)
-            (put-text-property title-start title-end 'face 'rfcview:rfc-title-face))))
+      (forward-line 1)
+      (while (and (not (eobp)) (looking-at "^[ \t]*$"))
+        (forward-line 1))
+      (let ((title-start (point))
+            (title-end (point)))
+        (while (and (not (eobp))
+                    (not (looking-at "^[ \t]*$"))
+                    (looking-at "^[[:space:]]+[^[:space:]]"))
+          (forward-line 1)
+          (setq title-end (point)))
+        (when (< title-start title-end)
+          (put-text-property title-start title-end 'face 'rfcview:read-rfc-title-face)))
       ;; Section headings: apply face to the heading line only (not surrounding blanks)
-      (goto-char (point-min))
       (while (re-search-forward rfcview:section-heading-regexp nil t)
         (let* ((line-start (1+ (match-beginning 0)))
                (line-end (save-excursion
                            (goto-char line-start)
                            (line-end-position))))
-          (put-text-property line-start line-end 'face 'rfcview:rfc-section-face)
+          (put-text-property line-start line-end 'face 'rfcview:read-rfc-section-face)
           ;; Back up one char when the match consumed a trailing blank line so
           ;; it remains available as the leading blank for the next heading match.
           (when (and (>= (point) 2)
@@ -258,10 +271,6 @@ line from the top margin is left visible so navigation works correctly."
   (setq mode-name "RFC"
         major-mode 'rfcview:read-mode
         buffer-read-only t)
-  ;; (setq-local font-lock-multiline t)
-  ;; (setq font-lock-defaults '((rfcview:read-mode-font-lock-keywords) t))
-  ;; (font-lock-mode 1)
-  ;; (font-lock-ensure)
   (rfcview:read-fontify)
   (rfcview:read-trim-leading-blanks)
   (rfcview:read-hide-page-breaks)
