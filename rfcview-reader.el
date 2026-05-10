@@ -112,7 +112,9 @@
 (defun rfcview:read-hide-page-breaks ()
   "Hide RFC page footers, form feeds, page headers, and surrounding blank lines.
 Each page break block is: blank padding lines, footer ([Page N]), form feed,
-page header, blank padding lines.  All of that is replaced by nothing."
+page header, blank padding lines.  All of that is replaced by nothing.
+When the first visible line after the break is a section heading, one blank
+line from the top margin is left visible so navigation works correctly."
   (save-excursion
     (goto-char (point-min))
     (while (search-forward "\f" nil t)
@@ -132,20 +134,24 @@ page header, blank padding lines.  All of that is replaced by nothing."
                  (end (save-excursion
                         (goto-char ff-pos)
                         (forward-line 2)      ; skip FF line and header line
-                        (while (and (not (eobp))
-                                    (looking-at "^[ \t]*$"))
-                          (forward-line 1))
+                        (let (last-blank)
+                          (while (and (not (eobp))
+                                      (looking-at "^[ \t]*$"))
+                            (setq last-blank (point))
+                            (forward-line 1))
+                          ;; Leave one real blank line visible before a section
+                          ;; heading so that line-move navigation works correctly.
+                          (when (and last-blank
+                                     (not (eobp))
+                                     (save-excursion
+                                       (goto-char (1- (point)))
+                                       (looking-at rfcview:section-heading-regexp)))
+                            (goto-char last-blank)))
                         (point))))
             (when (< start end)
               (let ((ov (make-overlay start end)))
                 (overlay-put ov 'invisible t)
-                (overlay-put ov 'evaporate t))
-              (when (and (< end (point-max))
-                         (save-excursion
-                           (goto-char (1- end))
-                           (looking-at rfcview:section-heading-regexp)))
-                (let ((sep (make-overlay end end)))
-                  (overlay-put sep 'before-string "\n"))))))))))
+                (overlay-put ov 'evaporate t)))))))))
 
 
 
