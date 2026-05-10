@@ -85,6 +85,7 @@
     (define-key map (kbd "+") 'text-scale-adjust)
     (define-key map (kbd "=") 'text-scale-adjust)
     (define-key map (kbd "RET") 'push-button)
+    (define-key map (kbd "o") 'rfcview:read-view-original)
     (define-key map (kbd "q") 'bury-buffer)
     map)
   "RFC read mode key map.")
@@ -173,6 +174,18 @@ line from the top margin is left visible so navigation works correctly."
                                (rfcview:read-rfc (button-get btn 'number)))
                      'help-echo (when rfc (plist-get rfc :title)))))))
 
+(defun rfcview:read-trim-leading-blanks ()
+  "Hide blank lines at the very beginning of the RFC buffer."
+  (let ((end (save-excursion
+               (goto-char (point-min))
+               (while (and (not (eobp)) (looking-at "^[ \t]*$"))
+                 (forward-line 1))
+               (point))))
+    (when (> end (point-min))
+      (let ((ov (make-overlay (point-min) end)))
+        (overlay-put ov 'invisible t)
+        (overlay-put ov 'evaporate t)))))
+
 (defun rfcview:read-mode ()
   (kill-all-local-variables)
   (use-local-map rfcview:read-mode-map)
@@ -181,9 +194,22 @@ line from the top margin is left visible so navigation works correctly."
         buffer-read-only t)
   (setq font-lock-defaults '((rfcview:read-mode-font-lock-keywords) t))
   (font-lock-mode 1)
+  (rfcview:read-trim-leading-blanks)
   (rfcview:read-hide-page-breaks)
   (rfcview:read-buttonize-refs)
   (run-hooks 'rfcview-read-mode-hook))
+
+(defvar-local rfcview:read-source-file nil
+  "Path to the cached txt file backing the current RFC read buffer.")
+
+(defun rfcview:read-view-original ()
+  "Open the raw cached txt file for this RFC in text-mode."
+  (interactive)
+  (unless rfcview:read-source-file
+    (error "Source file path not recorded for this buffer"))
+  (let ((buf (find-file-noselect rfcview:read-source-file)))
+    (with-current-buffer buf (text-mode))
+    (pop-to-buffer buf)))
 
 (defun rfcview:open-rfc-txt (number file)
   "Open locally cached txt FILE as RFC NUMBER and return the buffer."
@@ -191,7 +217,8 @@ line from the top margin is left visible so navigation works correctly."
     (with-current-buffer buffer
       (insert-file-contents file)
       (set-buffer-modified-p nil)
-      (rfcview:read-mode))
+      (rfcview:read-mode)
+      (setq rfcview:read-source-file file))
     buffer))
 
 (defun rfcview:open-rfc-pdf (number file)
