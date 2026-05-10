@@ -1,4 +1,4 @@
-;;; rfcview-index.el --- RFC index mode for rfcview
+;;; rfcview-index.el --- RFC index mode for rfcview -*- lexical-binding: t; -*-
 
 ;; This file is part of rfcview.el.  It is loaded by rfcview.el.
 ;; rfcview:read-rfc (from rfcview-reader.el) is called at runtime and need not
@@ -37,13 +37,12 @@ create the cache from scratch."
   "Parse an entry from rfc-index file."
   (with-current-buffer buffer
     (when (search-forward-regexp "^[0-9]\\{4\\} " nil t)
-      (let ((traits '((obsoletes . "Obsoletes\\s-+")
-                      (obeoleted-by . "Obsoleted\\s-+by\\s-+")
-                      (updates . "Updates\\s-+")
-                      (updated-by . "Updated\\s-+by\\s-+")))
+      (let ((traits '((obsoletes    . "Obsoletes\\s-+")
+                      (obsoleted-by . "Obsoleted\\s-+by\\s-+")
+                      (updates      . "Updates\\s-+")
+                      (updated-by   . "Updated\\s-+by\\s-+")))
             (beg (- (point) 6))
-            end number title authors date trait-begin
-            obsoletes obsoleted-by updates updated-by)
+            end number title authors date trait-begin trait-results)
         (condition-case e
             (progn
               (setq end (save-excursion (search-forward-regexp "^$" nil t)))
@@ -82,24 +81,26 @@ create the cache from scratch."
                                              (concat rfcview:month-name-pattern
                                                      "\\s-+\\([0-9]\\{4\\}\\)") end t))))
               (setq trait-begin (search-forward-regexp "\\s-+" end t))
-              (dolist (trait traits)
-                (goto-char trait-begin)
-                (set (car trait)
-                     (split-string
-                      (if (search-forward-regexp (concat "(" (cdr trait)) end t)
-                          (replace-regexp-in-string
-                           "\\s-+" " "
-                           (buffer-substring (point) (1- (search-forward ")" end t))))
-                        "")
-                      ",\\s-+" t)))
+              (setq trait-results
+                    (mapcar (lambda (trait)
+                              (goto-char trait-begin)
+                              (cons (car trait)
+                                    (split-string
+                                     (if (search-forward-regexp (concat "(" (cdr trait)) end t)
+                                         (replace-regexp-in-string
+                                          "\\s-+" " "
+                                          (buffer-substring (point) (1- (search-forward ")" end t))))
+                                       "")
+                                     ",\\s-+" t)))
+                            traits))
               (list :number number
                     :title title
                     :authors authors
                     :date date
-                    :obsoletes obsoletes
-                    :obsoleted-by obsoleted-by
-                    :updates updates
-                    :updated-by updated-by))
+                    :obsoletes    (cdr (assq 'obsoletes    trait-results))
+                    :obsoleted-by (cdr (assq 'obsoleted-by trait-results))
+                    :updates      (cdr (assq 'updates      trait-results))
+                    :updated-by   (cdr (assq 'updated-by   trait-results))))
           (error (rfcview:debug "parse error in rfc %d %S:\n%S"
                                 number (error-message-string e) (buffer-substring beg end))
                  (error "Parse index entry error!")))))))

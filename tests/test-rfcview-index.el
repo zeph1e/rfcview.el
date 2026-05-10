@@ -122,16 +122,14 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
         (should (member "RFC0027" updated-by))
         (should (member "RFC0030" updated-by))))))
 
-(ert-deftest rfcview:test-parse-index-entry-obsoleted-by-is-nil-due-to-typo ()
-  "Documents known bug: :obsoleted-by is always nil due to 'obeoleted-by' typo.
-The traits alist has (obeoleted-by . \"Obsoleted\\\\s-+by\\\\s-+\") but the
-let-binding is 'obsoleted-by', so (set 'obeoleted-by ...) never touches it."
+(ert-deftest rfcview:test-parse-index-entry-obsoleted-by ()
+  "Parses :obsoleted-by field correctly."
   (with-temp-buffer
     (insert (concat "0003 Documentation. S.D. Crocker. April 1969. "
                     "(Obsoleted by RFC0010) (Status: UNKNOWN)\n\n"))
     (goto-char (point-min))
     (let ((entry (rfcview:parse-index-entry (current-buffer))))
-      (should (null (plist-get entry :obsoleted-by))))))
+      (should (member "RFC0010" (plist-get entry :obsoleted-by))))))
 
 (ert-deftest rfcview:test-parse-index-entry-returns-nil-at-end-of-buffer ()
   "Returns nil when there are no more entries in the buffer."

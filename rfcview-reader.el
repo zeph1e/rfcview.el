@@ -1,4 +1,4 @@
-;;; rfcview-reader.el --- RFC document read mode for rfcview
+;;; rfcview-reader.el --- RFC document read mode for rfcview -*- lexical-binding: t; -*-
 
 ;; This file is part of rfcview.el.  It is loaded by rfcview.el.
 ;; rfcview:index-goto-number (from rfcview-index.el) is called at runtime and

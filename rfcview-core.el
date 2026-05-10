@@ -1,4 +1,4 @@
-;;; rfcview-core.el --- Shared data, faces, and network for rfcview
+;;; rfcview-core.el --- Shared data, faces, and network for rfcview -*- lexical-binding: t; -*-
 
 ;; This file is part of rfcview.el.  It is loaded by rfcview-index.el and
 ;; rfcview-reader.el and must not require either of them.
@@ -38,7 +38,7 @@
   :group 'rfcview)
 
 (defcustom rfcview:keyword-max-history 10
-  "The maximum count of keyword seach history."
+  "The maximum count of keyword search history."
   :type 'integer
   :group 'rfcview)
 
@@ -89,7 +89,7 @@ PDF viewing requires pdf-tools."
     (((class color) (background light))
      (:foreground "magenta"))
     (t (:bold t)))
-  "Face used to highlight favorite symbol in the *RFC INDEX* buffer."
+  "Face used to highlight the active filter button in the *RFC INDEX* buffer."
   :group 'rfcview)
 
 (defface rfcview:rfc-title-face
@@ -211,9 +211,9 @@ PDF viewing requires pdf-tools."
 (defun rfcview:retrieve (url &optional method)
   "A wrapper of url-retrieve-synchronously."
   (let ((encoded-url (url-encode-url url))
-        (url-request-method (or method "GET"))
-        context)
-    (with-current-buffer (url-retrieve-synchronously encoded-url t)
+        (url-request-method (or method "GET")))
+    (with-current-buffer (url-retrieve-synchronously
+                          encoded-url t nil rfcview:retrieve-timeout)
       (make-local-variable 'url-http-response-status)
       (let ((process (ignore-errors (get-buffer-process (current-buffer)))))
         (if (processp process)

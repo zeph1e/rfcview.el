@@ -1,4 +1,4 @@
-;;; rfcview.el --- RFC viewer for Emacs
+;;; rfcview.el --- RFC viewer for Emacs -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2016 Yunsik Jang
 
