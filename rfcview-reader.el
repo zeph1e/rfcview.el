@@ -110,8 +110,7 @@ References\" cause the second heading to be missed."
     (define-key map (kbd "l") #'(lambda () (interactive)
                                   (if (eolp) (error "End of line")
                                     (forward-char))))
-    (define-key map (kbd "/") 'isearch-forward)
-    (define-key map (kbd "?") 'isearch-backward)
+    (define-key map (kbd "?") 'rfcview:read-show-help)
 
     ;; section navigation
     (define-key map (kbd "]") 'rfcview:read-next-section)
@@ -124,7 +123,7 @@ References\" cause the second heading to be missed."
     (define-key map (kbd "=") 'text-scale-adjust)
     (define-key map (kbd "RET") 'push-button)
     (define-key map (kbd "o") 'rfcview:read-view-original)
-    (define-key map (kbd "q") 'bury-buffer)
+    (define-key map (kbd "q") 'rfcview:read-quit)
     map)
   "RFC read mode key map.")
 
@@ -264,6 +263,40 @@ line from the top margin is left visible so navigation works correctly."
       (let ((ov (make-overlay (point-min) end)))
         (overlay-put ov 'invisible t)
         (overlay-put ov 'evaporate t)))))
+
+(defun rfcview:read-quit ()
+  "Bury the RFC reader buffer and refocus the index window if visible."
+  (interactive)
+  (bury-buffer)
+  (let ((index-win (get-buffer-window "*RFC INDEX*")))
+    (when index-win
+      (select-window index-win))))
+
+(defun rfcview:read-show-help ()
+  "Show a help buffer listing rfcview read mode keybindings."
+  (interactive)
+  (with-current-buffer (get-buffer-create "*RFC Help*")
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (insert "rfcview\n\n")
+      (insert "  An Emacs tool for browsing, downloading, and reading IETF RFC\n")
+      (insert "  documents. Presents an interactive index with filtering by\n")
+      (insert "  favorites, recents, or keyword search. RFC documents are\n")
+      (insert "  downloaded and cached locally on first access.\n\n")
+      (insert "Keybindings\n\n")
+      (insert "  Navigation\n")
+      (insert "    j / k       next / previous line\n")
+      (insert "    h / l       backward / forward char\n")
+      (insert "    ] / [       next / previous section\n")
+      (insert "    RET         follow link\n\n")
+      (insert "  View\n")
+      (insert "    + / = / -   increase / reset / decrease text scale\n")
+      (insert "    o           view original file\n")
+      (insert "    q           quit\n")
+      (insert "    ?           this help\n"))
+    (view-mode 1)
+    (goto-char (point-min)))
+  (display-buffer "*RFC Help*"))
 
 (defun rfcview:read-mode ()
   (kill-all-local-variables)

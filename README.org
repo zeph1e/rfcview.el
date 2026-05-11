@@ -61,6 +61,7 @@ Place all four =.el= files (=rfcview.el=, =rfcview-core.el=, =rfcview-index.el=,
 | =#=           | Jump to RFC by number           |
 | =f=           | Jump to filter line             |
 | =g=           | Refresh index                   |
+| =?=           | Help                            |
 | =q=           | Bury buffer                     |
 
 In an RFC read buffer:
@@ -68,10 +69,13 @@ In an RFC read buffer:
 | Key       | Action                              |
 |-----------+-------------------------------------|
 | =]= / =[=     | Next / previous section heading |
-| =/= / =?=     | Search forward / backward       |
+| =n= / =p=     | Next / previous line            |
 | =j= / =k=     | Next / previous line (vi)       |
+| =h= / =l=     | Backward / forward char (vi)    |
 | =+= / =-=     | Increase / decrease font size   |
-| =q=           | Bury buffer                     |
+| =o=           | View raw cached file            |
+| =?=           | Help                            |
+| =q=           | Quit (refocus index if visible) |
 
 ** PDF support
 

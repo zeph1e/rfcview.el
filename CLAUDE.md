@@ -47,7 +47,7 @@ Note: `rfcview:read-rfc-header-face`, `rfcview:read-rfc-title-face`, and `rfcvie
 
 **Parsing** — `rfcview:parse-index-entry` / `rfcview:parse-index-buffer` parse the raw IETF rfc-index text into the hash-table stored in `rfcview:rfc-cache`. `rfcview:update-index` orchestrates update: it sends a HEAD request via `rfcview:index-updated-p` and only fetches the full index when `Last-Modified` has advanced.
 
-**Index mode** (`*RFC INDEX*` buffer, `rfcview:index-mode`) — a read-only buffer rendered by `rfcview:refresh-index`. Each entry is built by `rfcview:make-entry-line` and inserted by `rfcview:insert-with-text-properties`, which also creates clickable buttons for RFC cross-references within traits. Entry navigation uses `rfcview:number` text properties and `paragraph` boundaries. A filter line at the top provides buttons for All / Favorites / Recents / keyword search. The current entry is highlighted with `rfcview:background-highlight-overlay`.
+**Index mode** (`*RFC INDEX*` buffer, `rfcview:index-mode`) — a read-only buffer rendered by `rfcview:refresh-index`. Each entry is built by `rfcview:make-entry-line` and inserted by `rfcview:insert-with-text-properties`, which also creates clickable buttons for RFC cross-references within traits. Entry navigation uses `rfcview:number` text properties and `paragraph` boundaries. A filter line at the top provides buttons for All / Favorites / Recents / keyword search. The current entry is highlighted with `rfcview:background-highlight-overlay`. `?` opens `rfcview:index-show-help`.
 
 Index layout uses Emacs's `word-wrap` mode with `wrap-prefix` text properties (no literal newlines in entry strings). The date on each entry is placed in the right margin (`right-margin-width` = 15) via a `display '((margin right-margin) DATE)` carrier character on the author line, right-aligned with `format "%15s"`. `rfcview:refresh-index` calls `(set-window-fringes nil nil nil t)` (OUTSIDE-MARGINS = t) so the right fringe is placed after the right margin rather than between the text area and the margin, eliminating the visible separator while keeping the outer fringe intact.
 
@@ -66,7 +66,7 @@ On load of a text RFC, four post-processing steps run:
 - `rfcview:read-buttonize-refs` — turns every `RFC XXXX` and `[RFCXXXX]` occurrence into a clickable button that opens that RFC document.
 - `rfcview:read-trim-leading-blanks` — hides blank lines at the very start of the buffer.
 
-Navigation keys: vi-style line/char movement (`h`/`j`/`k`/`l`), `/`/`?` for isearch, `]`/`[` for next/previous section heading, `RET` to activate a button, `+`/`-`/`=`/`0` for `text-scale-adjust`, `q` to bury.
+Navigation keys: vi-style line/char movement (`h`/`j`/`k`/`l`), `]`/`[` for next/previous section heading, `RET` to activate a button, `+`/`-`/`=`/`0` for `text-scale-adjust`, `o` to view the raw cached file, `?` opens `rfcview:read-show-help`. `q` runs `rfcview:read-quit`, which buries the buffer and selects the `*RFC INDEX*` window if it is visible in the current frame.
 
 ### rfcview.el — entry point
 
