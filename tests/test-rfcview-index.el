@@ -388,14 +388,20 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
       (should (string-match-p "R. Braden" line)))))
 
 (ert-deftest rfcview:test-make-entry-line-contains-date ()
-  "Entry line contains the publication date."
+  "Entry line encodes the publication date in a right-margin display property."
   (let ((rfcview:use-face nil)
         (rfcview:use-debug nil)
         (rfcview:index-filter nil))
-    (let ((line (rfcview:make-entry-line 793 "TCP" "September 1981"
-                                         '("J. Postel")
-                                         nil nil nil nil nil)))
-      (should (string-match-p "September 1981" line)))))
+    (let* ((line (rfcview:make-entry-line 793 "TCP" "September 1981"
+                                          '("J. Postel")
+                                          nil nil nil nil nil))
+           (pos 0)
+           found)
+      (while (setq pos (next-single-property-change pos 'display line))
+        (let ((str (cadr (get-text-property pos 'display line))))
+          (when (and (stringp str) (string-match-p "September 1981" str))
+            (setq found t))))
+      (should found))))
 
 (ert-deftest rfcview:test-make-entry-line-marks-favorite ()
   "Entry line includes the favorite symbol when favorite is non-nil."
