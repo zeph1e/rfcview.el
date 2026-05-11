@@ -23,6 +23,9 @@
 
 (defvar rfcview:filter-keyword-current-result nil)
 
+(defvar rfcview:background-highlight-overlay nil)
+(defvar rfcview:margin-highlight-overlays nil)
+
 (defun rfcview:initialize (&optional from-scratch)
   "Initialize & update RFC index cache.
 If FROM-SCRATCH is non-nil, discard cached data and
@@ -169,7 +172,8 @@ create the cache from scratch."
                                         (cdr (assoc number rfcview:filter-keyword-current-result))))))
 
     (let* ((num-end (length num-str))
-           (title-str (concat num-str title "\n")))
+           (margin-display (propertize " " 'display `((margin right-margin) " ")))
+           (title-str (concat num-str title margin-display"\n")))
       (put-text-property 0 (length title-str) 'wrap-prefix margin title-str)
       (when rfcview:use-face
         (put-text-property 0 num-end 'face 'rfcview:rfc-number-face title-str)
@@ -185,13 +189,14 @@ create the cache from scratch."
       (push title-str parts))
 
     (let* ((author-text (mapconcat #'identity authors ", "))
-           (spacer (propertize " " 'display
-                               `(space :align-to (- right ,(1+ (length date))))))
-           (line (concat margin author-text spacer date "\n")))
+           (date-str (if rfcview:use-face
+                         (propertize (format "%15s" date) 'face 'rfcview:rfc-date-face)
+                       (format "%15s" date)))
+           (date-display (propertize " " 'display `((margin right-margin) ,date-str)))
+           (line (concat margin date-display author-text "\n")))
+      (put-text-property 0 (length line) 'wrap-prefix margin line)
       (when rfcview:use-face
-        (let ((a-end (+ margin-width (length author-text))))
-          (put-text-property margin-width a-end 'face 'rfcview:rfc-authors-face line)
-          (put-text-property (1+ a-end) (1- (length line)) 'face 'rfcview:rfc-date-face line)))
+        (put-text-property (1+ margin-width) (1- (length line)) 'face 'rfcview:rfc-authors-face line))
       (push line parts))
 
     (let (trait-parts)
@@ -324,6 +329,7 @@ create the cache from scratch."
 (defun rfcview:refresh-index ()
   "Refresh RFC index."
   (rfcview:debug "refreshing...")
+  (set-window-fringes nil nil 0)
   (let ((inhibit-read-only t)
         (saved-point (unless rfcview:suppress-recover-position
                        (save-excursion
@@ -465,6 +471,8 @@ create the cache from scratch."
     (unless (overlayp rfcview:background-highlight-overlay)
       (setq rfcview:background-highlight-overlay (make-overlay 0 0))
       (overlay-put rfcview:background-highlight-overlay 'face 'rfcview:entry-highlight-face))
+    (mapc #'delete-overlay rfcview:margin-highlight-overlays)
+    (setq rfcview:margin-highlight-overlays nil)
     (let* ((at (save-excursion
                  (backward-paragraph)
                  (point)))
@@ -476,7 +484,22 @@ create the cache from scratch."
                      (eq 0 (get-text-property end 'rfcview:number))))
         (setq beg (point-min)
               end (point-min)))
-      (move-overlay rfcview:background-highlight-overlay beg end))))
+      (move-overlay rfcview:background-highlight-overlay beg end)
+      (when (< beg end)
+        (let ((win (get-buffer-window)))
+          (when win
+            (with-selected-window win
+              (save-excursion
+                (goto-char beg)
+                (while (< (point) end)
+                  (end-of-visual-line)
+                  (let ((ov (make-overlay (point) (point))))
+                    (overlay-put ov 'after-string
+                                 (propertize " " 'display
+                                             `((margin right-margin)
+                                               ,(propertize " " 'face 'rfcview:entry-highlight-face))))
+                    (push ov rfcview:margin-highlight-overlays))
+                  (vertical-motion 1))))))))))
 
 (defun rfcview:index-read-item (&optional number)
   (interactive)
@@ -592,7 +615,9 @@ create the cache from scratch."
   (rfcview:save-cache)
   (with-current-buffer (get-buffer "*RFC INDEX*")
     (when (overlayp rfcview:background-highlight-overlay)
-      (delete-overlay rfcview:background-highlight-overlay)))
+      (delete-overlay rfcview:background-highlight-overlay))
+    (mapc #'delete-overlay rfcview:margin-highlight-overlays)
+    (setq rfcview:margin-highlight-overlays nil))
   (setq rfcview:rfc-cache nil))
 
 (defun rfcview:index-mode ()
@@ -607,7 +632,9 @@ Keybindings:
         major-mode 'rfcview:index-mode
         buffer-read-only t)
   (setq word-wrap t)
+  (setq right-margin-width 15)
   (set (make-local-variable 'rfcview:background-highlight-overlay) nil)
+  (set (make-local-variable 'rfcview:margin-highlight-overlays) nil)
   (add-hook 'kill-buffer-hook 'rfcview:index-cleanup t t)
   (add-hook 'kill-emacs-hook 'rfcview:index-cleanup)
   (add-hook 'post-command-hook 'rfcview:move-entry-highlight t t)

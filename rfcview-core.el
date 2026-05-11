@@ -164,9 +164,9 @@ PDF viewing requires pdf-tools."
 
 (defface rfcview:entry-highlight-face
   '((((class color) (min-colors 88) (background dark))
-     (:background "gray20"))
+     (:background "gray20" :extend t))
     (((class color) (min-colors 88) (background light))
-     (:background "gray70")))
+     (:background "gray70" :extend t)))
   "Face used to highlight current entry."
   :group 'rfcview)
 
