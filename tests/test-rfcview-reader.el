@@ -694,5 +694,53 @@ that regex fails to match a line that contains only \\r (from CRLF)."
               ((symbol-function 'file-exists-p) (lambda (_) nil)))
       (should-error (rfcview:read-rfc 99998)))))
 
+;;; ─── rfcview:read-show-help ──────────────────────────────────────────────────
+
+(ert-deftest rfcview:test-read-show-help-keys-match-keymap ()
+  "Every key listed in the read help buffer is bound as documented in the keymap."
+  (let ((m rfcview:read-mode-map))
+    (should (eq  (lookup-key m (kbd "j"))   'next-line))
+    (should (eq  (lookup-key m (kbd "k"))   'previous-line))
+    (should      (lookup-key m (kbd "h")))   ; lambda — just check bound
+    (should      (lookup-key m (kbd "l")))   ; lambda — just check bound
+    (should (eq  (lookup-key m (kbd "]"))   'rfcview:read-next-section))
+    (should (eq  (lookup-key m (kbd "["))   'rfcview:read-prev-section))
+    (should (eq  (lookup-key m (kbd "RET")) 'push-button))
+    (should (eq  (lookup-key m (kbd "+"))   'text-scale-adjust))
+    (should (eq  (lookup-key m (kbd "="))   'text-scale-adjust))
+    (should (eq  (lookup-key m (kbd "-"))   'text-scale-adjust))
+    (should (eq  (lookup-key m (kbd "o"))   'rfcview:read-view-original))
+    (should (eq  (lookup-key m (kbd "q"))   'rfcview:read-quit))
+    (should (eq  (lookup-key m (kbd "?"))   'rfcview:read-show-help))))
+
+;;; ─── rfcview:read-quit ───────────────────────────────────────────────────────
+
+(ert-deftest rfcview:test-read-quit-buries-buffer ()
+  "rfcview:read-quit buries the current buffer."
+  (let (buried)
+    (cl-letf (((symbol-function 'bury-buffer)      (lambda () (setq buried t)))
+              ((symbol-function 'get-buffer-window) (lambda (_) nil)))
+      (rfcview:read-quit)
+      (should buried))))
+
+(ert-deftest rfcview:test-read-quit-selects-index-when-visible ()
+  "rfcview:read-quit selects the index window when it is visible."
+  (let ((fake-win (make-symbol "win"))
+        selected)
+    (cl-letf (((symbol-function 'bury-buffer)      #'ignore)
+              ((symbol-function 'get-buffer-window) (lambda (_) fake-win))
+              ((symbol-function 'select-window)     (lambda (w) (setq selected w))))
+      (rfcview:read-quit)
+      (should (eq selected fake-win)))))
+
+(ert-deftest rfcview:test-read-quit-no-select-when-index-hidden ()
+  "rfcview:read-quit does not select any window when the index is not visible."
+  (let (selected)
+    (cl-letf (((symbol-function 'bury-buffer)      #'ignore)
+              ((symbol-function 'get-buffer-window) (lambda (_) nil))
+              ((symbol-function 'select-window)     (lambda (w) (setq selected w))))
+      (rfcview:read-quit)
+      (should-not selected))))
+
 (provide 'test-rfcview-reader)
 ;;; test-rfcview-reader.el ends here

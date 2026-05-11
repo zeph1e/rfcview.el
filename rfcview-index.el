@@ -388,7 +388,7 @@ create the cache from scratch."
     (define-key map (kbd "?") 'rfcview:index-show-help)
     (define-key map (kbd "f") 'rfcview:index-goto-filter)
     (define-key map (kbd "#") 'rfcview:index-goto-number)
-    (define-key map (kbd " ") 'rfcview:index-read-item)
+    (define-key map (kbd "SPC") 'rfcview:index-read-item)
     (define-key map (kbd "RET") 'rfcview:index-read-item)
     (define-key map (kbd "TAB") 'forward-button)
     (define-key map (kbd "<backtab>") 'backward-button)

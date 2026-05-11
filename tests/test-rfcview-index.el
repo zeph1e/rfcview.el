@@ -667,5 +667,27 @@ Mocks rfcview:refresh-index so no window operations occur."
       (rfcview:refresh-header-line)
       (should (not (null header-line-format))))))
 
+;;; ─── rfcview:index-show-help ─────────────────────────────────────────────────
+
+(ert-deftest rfcview:test-index-show-help-keys-match-keymap ()
+  "Every key listed in the index help buffer is bound as documented in the keymap."
+  (let ((m rfcview:index-mode-map))
+    (should (eq (lookup-key m (kbd "n"))         'rfcview:index-forward-item))
+    (should (eq (lookup-key m (kbd "p"))         'rfcview:index-backward-item))
+    (should (eq (lookup-key m (kbd "RET"))       'rfcview:index-read-item))
+    (should (eq (lookup-key m (kbd "SPC"))       'rfcview:index-read-item))
+    (should (eq (lookup-key m (kbd "#"))         'rfcview:index-goto-number))
+    (should (eq (lookup-key m (kbd "TAB"))       'forward-button))
+    (should (eq (lookup-key m (kbd "A"))         'rfcview:index-apply-filter-all))
+    (should (eq (lookup-key m (kbd "*"))         'rfcview:index-apply-filter-all))
+    (should (eq (lookup-key m (kbd "F"))         'rfcview:index-apply-filter-favorite))
+    (should (eq (lookup-key m (kbd "R"))         'rfcview:index-apply-filter-recent))
+    (should (eq (lookup-key m (kbd "K"))         'rfcview:index-apply-filter-keywords))
+    (should (eq (lookup-key m (kbd "f"))         'rfcview:index-goto-filter))
+    (should (eq (lookup-key m (kbd "v"))         'rfcview:index-toggle-favorite))
+    (should (eq (lookup-key m (kbd "g"))         'rfcview:index-refresh-screen))
+    (should (eq (lookup-key m (kbd "q"))         'bury-buffer))
+    (should (eq (lookup-key m (kbd "?"))         'rfcview:index-show-help))))
+
 (provide 'test-rfcview-index)
 ;;; test-rfcview-index.el ends here
