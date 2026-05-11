@@ -329,7 +329,7 @@ create the cache from scratch."
 (defun rfcview:refresh-index ()
   "Refresh RFC index."
   (rfcview:debug "refreshing...")
-  (set-window-fringes nil nil 0)
+  (set-window-fringes nil nil nil t)
   (let ((inhibit-read-only t)
         (saved-point (unless rfcview:suppress-recover-position
                        (save-excursion
