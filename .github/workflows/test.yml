@@ -1,0 +1,149 @@
+name: Tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Emacs
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y emacs-nox
+
+      - name: Run tests
+        id: run-tests
+        continue-on-error: true
+        run: bash run-tests.sh 2>&1 | tee /tmp/test-output.txt
+
+      - name: Extract failed tests
+        if: steps.run-tests.outcome == 'failure'
+        run: grep -E 'FAILED' /tmp/test-output.txt > /tmp/failures.txt || true
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && steps.run-tests.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const failures   = fs.readFileSync('/tmp/failures.txt',    'utf8').trim();
+            const fullOutput = fs.readFileSync('/tmp/test-output.txt', 'utf8').trim();
+
+            const marker = '<!-- rfcview-ci-failure -->';
+            const body = [
+              marker,
+              '## :x: Test Failures',
+              '',
+              `**Commit:** \`${context.sha}\``,
+              '',
+              '### Failed tests',
+              '```',
+              failures || '(unable to parse failure details)',
+              '```',
+              '',
+              '<details>',
+              '<summary>Full test output</summary>',
+              '',
+              '```',
+              fullOutput,
+              '```',
+              '</details>',
+            ].join('\n');
+
+            // Update existing comment if present, otherwise create a new one.
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner:      context.repo.owner,
+                repo:       context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner:        context.repo.owner,
+                repo:         context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Create issue on push failure
+        if: github.event_name == 'push' && steps.run-tests.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const failures   = fs.readFileSync('/tmp/failures.txt',    'utf8').trim();
+            const fullOutput = fs.readFileSync('/tmp/test-output.txt', 'utf8').trim();
+
+            const shortSha  = context.sha.slice(0, 7);
+            const refName   = context.ref.replace('refs/heads/', '');
+            const commitUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${context.sha}`;
+            const runUrl    = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            const body = [
+              `## Test failures on \`${refName}\``,
+              '',
+              `**Commit:** [\`${shortSha}\`](${commitUrl})  `,
+              `**Branch:** \`${refName}\`  `,
+              `**Run:** [${context.runId}](${runUrl})`,
+              '',
+              '### Failed tests',
+              '```',
+              failures || '(unable to parse failure details)',
+              '```',
+              '',
+              '<details>',
+              '<summary>Full test output</summary>',
+              '',
+              '```',
+              fullOutput,
+              '```',
+              '</details>',
+            ].join('\n');
+
+            // Ensure the 'bug' label exists before using it.
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                name:  'bug',
+              });
+            } catch {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                name:  'bug',
+                color: 'd73a4a',
+              });
+            }
+
+            await github.rest.issues.create({
+              owner:  context.repo.owner,
+              repo:   context.repo.repo,
+              title:  `Test failure: ${refName} @ ${shortSha}`,
+              body,
+              labels: ['bug'],
+            });
+
+      - name: Fail job on test failure
+        if: steps.run-tests.outcome == 'failure'
+        run: exit 1
