@@ -2,7 +2,8 @@
 
 *rfcview* is an Emacs tool for browsing, downloading, and reading IETF RFC documents inside Emacs. When you run *rfcview*, it updates the RFC index if necessary, then presents an interactive index buffer.
 
-[[file:res/rfcview.png]]
+[[file:res/rfcview-dark.png]]
+[[file:res/rfcview-light.png]]
 
 ** Features
 
@@ -71,6 +72,7 @@ In an RFC read buffer:
 | Key       | Action                              |
 |-----------+-------------------------------------|
 | =]= / =[=     | Next / previous section heading |
+| =TAB= / =S-TAB= | Next / previous RFC cross-reference |
 | =n= / =p=     | Next / previous line            |
 | =j= / =k=     | Next / previous line (vi)       |
 | =h= / =l=     | Backward / forward char (vi)    |
