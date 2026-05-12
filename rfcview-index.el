@@ -24,6 +24,7 @@
 (defvar rfcview:filter-keyword-current-result nil)
 
 (defvar rfcview:background-highlight-overlay nil)
+
 (defvar rfcview:margin-highlight-overlays nil)
 
 (defun rfcview:initialize (&optional from-scratch)

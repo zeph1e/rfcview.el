@@ -34,11 +34,7 @@
   :group 'rfcview)
 
 (defface rfcview:read-rfc-section-face
-  '((((class color) (min-colors 88) (background dark))
-     (:weight bold))
-    (((class color) (min-colors 88) (background light))
-     (:weight bold))
-    (t (:bold t)))
+  '((t (:bold t)))
   "Face for section headings in RFC read mode."
   :group 'rfcview)
 
@@ -54,6 +50,8 @@
    "\\|[0-9]+\\(?:\\.[0-9]+\\)*[ \t]+"
    ;; Roman numeral: "I.  Title" / "IV.  Section" / "II. Foo"
    "\\|[IVX]+\\.?[ \t]+"
+   ;; Roman numeral with dash: "I - INTRODUCTION"
+   "\\|[IVX]+[ \t]*-[ \t]+"
    "\\)"
    "[A-Z(\"][^,\n]*\n\n"
    ;; Appendix headings are unambiguous so only the first line is matched;
@@ -66,13 +64,15 @@
    "\\|^\n[A-Z]\\.[0-9]\\{1,2\\}\\.?[ \t]+[A-Z][^\n]*\n"
    ;; ALL-CAPS bare-word headings (RFC 854/959/1122 era):
    ;; "INTRODUCTION" / "GENERAL CONSIDERATIONS" / "LINK LAYER REFERENCES"
-   "\\|^\n[A-Z][A-Z ]\\{5,\\}[A-Z]\n"
+   "\\|^\n[A-Z][A-Z() ]\\{,50\\}[A-Z]\n"
+   ;; Colon follows (RFC 42)
+   "\\|^\n[ ]\\{,3\\}[A-Z ]+:\n\n"
    ;; Mixed-case standalone keyword headings
    "\\|^\nAcknowledgements?[^\n]*\n"
    "\\|^\nAuthors' Addresses?[^\n]*\n"
    "\\|^\nAbstract[^\n]*\n"
    ;; Dash-underline style (RFC 768 era): "Introduction\n------------\n"
-   "\\|^\n[A-Z][a-zA-Z ]+\n[[:space:]]*-\\{3,\\}\n")
+   "\\|^\n[ ]*[A-Z][a-zA-Z0-9. ]+\n[ ]*-\\{3,\\}\n")
   "Regexp matching RFC section headings across all eras, preceded by a blank line.")
 
 (defun rfcview:section-heading-search (bound)
@@ -212,7 +212,10 @@ line from the top margin is left visible so navigation works correctly."
                             (point-min))))
                  (end (save-excursion
                         (goto-char ff-pos)
-                        (forward-line 2)      ; skip FF line and header line
+                        (forward-line)
+                        (when (looking-at (format ".*RFC.*%d.*"
+                                                rfcview:read-rfc-number))
+                            (forward-line))
                         (let (last-blank)
                           (while (and (not (eobp))
                                       (looking-at "^[ \t]*$"))
@@ -298,12 +301,14 @@ line from the top margin is left visible so navigation works correctly."
     (goto-char (point-min)))
   (display-buffer "*RFC Help*"))
 
-(defun rfcview:read-mode ()
+(defun rfcview:read-mode (number file)
   (kill-all-local-variables)
   (use-local-map rfcview:read-mode-map)
   (setq mode-name "RFC"
         major-mode 'rfcview:read-mode
-        buffer-read-only t)
+        buffer-read-only t
+        rfcview:read-source-file file
+        rfcview:read-rfc-number number)
   (rfcview:read-fontify)
   (rfcview:read-trim-leading-blanks)
   (rfcview:read-hide-page-breaks)
@@ -325,11 +330,7 @@ line from the top margin is left visible so navigation works correctly."
     (with-current-buffer buffer
       (insert-file-contents file)
       (set-buffer-modified-p nil)
-      (rfcview:read-mode)
-      ;; Set after rfcview:read-mode: kill-all-local-variables runs first in the mode
-      ;; function and would clear any values set before the call.
-      (setq rfcview:read-source-file file
-            rfcview:read-rfc-number number))
+      (rfcview:read-mode number file))
     buffer))
 
 (defun rfcview:open-rfc-pdf (number file)
