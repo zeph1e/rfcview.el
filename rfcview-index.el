@@ -390,8 +390,7 @@ create the cache from scratch."
   (rfcview:index-goto-number (button-get btn 'number)))
 
 (defun rfcview:filter-button-action (btn)
-  (let* ((filter (get-text-property (button-start btn) 'filter))
-         (label (button-label btn)))
+  (let ((filter (get-text-property (button-start btn) 'filter)))
     (cond ((or (functionp filter) (null filter))
            (setq rfcview:index-filter filter)
            (let ((rfcview:suppress-recover-position t))
@@ -473,11 +472,7 @@ create the cache from scratch."
   (interactive (list (string-to-number (read-from-minibuffer "RFC number: "))))
   (unless (member number rfcview:index-current-list-items)
     (error "No such RFC number in current (filtered) index."))
-  (let* ((at (save-excursion
-               (backward-paragraph)
-               (point)))
-         (target (next-single-property-change at 'rfcview:number))
-         (moveto (let ((pos (point-min)) found)
+  (let ((moveto (let ((pos (point-min)) found)
                    (while (and (not found)
                                (setq pos (next-single-property-change
                                           pos 'rfcview:number nil (point-max))))

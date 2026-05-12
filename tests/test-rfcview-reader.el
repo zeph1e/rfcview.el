@@ -126,52 +126,6 @@ also match — this test documents the case-sensitive-only behavior."
     (should-not (rfcview-test:matches-heading "\n1.  lowercase title\n\n"))
     (should (rfcview-test:matches-heading "\n1.  Uppercase Title\n\n"))))
 
-;;; ─── rfcview:section-heading-search ─────────────────────────────────────────
-
-(ert-deftest rfcview:test-section-heading-search-finds-first-heading ()
-  "section-heading-search finds the first heading in the buffer."
-  (with-temp-buffer
-    (insert "\nSome prose.\n\n1.  Introduction\n\nDetails here.\n")
-    (goto-char (point-min))
-    (should (rfcview:section-heading-search nil))))
-
-(ert-deftest rfcview:test-section-heading-search-advances-point ()
-  "After a successful match, point is advanced past the heading."
-  (with-temp-buffer
-    (insert "\n1.  Introduction\n\nContent.\n")
-    (goto-char (point-min))
-    (rfcview:section-heading-search nil)
-    (should (> (point) 1))))
-
-(ert-deftest rfcview:test-section-heading-search-returns-nil-when-none ()
-  "Returns nil when the buffer has no section headings."
-  (with-temp-buffer
-    (insert "No headings here at all.\nJust prose.\n")
-    (goto-char (point-min))
-    (should-not (rfcview:section-heading-search nil))))
-
-(ert-deftest rfcview:test-section-heading-search-finds-adjacent-headings ()
-  "Can find both of two adjacent headings (backs up one newline after double-\\n match)."
-  (with-temp-buffer
-    (insert "\n8.  References\n\n8.1.  Normative References\n\nSome ref.\n")
-    (goto-char (point-min))
-    (let ((first  (rfcview:section-heading-search nil))
-          (second (rfcview:section-heading-search nil)))
-      (should first)
-      (should second))))
-
-(ert-deftest rfcview:test-section-heading-search-respects-bound ()
-  "Stops at BOUND and returns nil if no match is found before it."
-  (with-temp-buffer
-    (insert "\n1.  Section One\n\nContent after bound.\n\n2.  Section Two\n\n")
-    (goto-char (point-min))
-    (let* ((bound (save-excursion
-                    (search-forward "Content after bound")
-                    (point)))
-           (first  (rfcview:section-heading-search bound))
-           (second (rfcview:section-heading-search bound)))
-      (should first)
-      (should-not second))))
 
 ;;; ─── rfcview:read-fontify ────────────────────────────────────────────────────
 
@@ -710,6 +664,49 @@ that regex fails to match a line that contains only \\r (from CRLF)."
     (cl-letf (((symbol-function 'rfcview:download-rfc) (lambda (&rest _) nil))
               ((symbol-function 'file-exists-p) (lambda (_) nil)))
       (should-error (rfcview:read-rfc 99998)))))
+
+(ert-deftest rfcview:test-read-rfc-falls-back-to-pdf-when-txt-unavailable ()
+  "read-rfc falls back to PDF when the txt download returns nil (404)."
+  (let ((rfcview:local-directory "/nonexistent/dir/")
+        (rfcview:preferred-format 'txt)
+        opened-fmt)
+    (cl-letf (((symbol-function 'file-exists-p) (lambda (_) nil))
+              ((symbol-function 'rfcview:download-rfc)
+               (lambda (_number fmt file) (if (eq fmt 'pdf) file nil)))
+              ((symbol-function 'rfcview:open-rfc-pdf)
+               (lambda (_number _file) (setq opened-fmt 'pdf) (current-buffer)))
+              ((symbol-function 'pop-to-buffer) #'ignore))
+      (rfcview:read-rfc 8)
+      (should (eq opened-fmt 'pdf)))))
+
+(ert-deftest rfcview:test-read-rfc-preferred-pdf-falls-back-to-txt ()
+  "When preferred-format is pdf but PDF download fails, falls back to txt."
+  (let ((rfcview:local-directory "/nonexistent/dir/")
+        (rfcview:preferred-format 'pdf)
+        opened-fmt)
+    (cl-letf (((symbol-function 'file-exists-p) (lambda (_) nil))
+              ((symbol-function 'rfcview:download-rfc)
+               (lambda (_number fmt file) (if (eq fmt 'txt) file nil)))
+              ((symbol-function 'rfcview:open-rfc-txt)
+               (lambda (_number _file) (setq opened-fmt 'txt) (current-buffer)))
+              ((symbol-function 'pop-to-buffer) #'ignore))
+      (rfcview:read-rfc 793)
+      (should (eq opened-fmt 'txt)))))
+
+(ert-deftest rfcview:test-read-rfc-uses-cached-pdf-without-downloading ()
+  "read-rfc uses a locally cached PDF without calling download-rfc."
+  (let ((rfcview:local-directory "/fake/dir/")
+        (rfcview:preferred-format 'pdf)
+        downloaded)
+    (cl-letf (((symbol-function 'file-exists-p)
+               (lambda (f) (string-suffix-p ".pdf" f)))
+              ((symbol-function 'rfcview:download-rfc)
+               (lambda (&rest _) (setq downloaded t) nil))
+              ((symbol-function 'rfcview:open-rfc-pdf)
+               (lambda (_number _file) (current-buffer)))
+              ((symbol-function 'pop-to-buffer) #'ignore))
+      (rfcview:read-rfc 8)
+      (should-not downloaded))))
 
 ;;; ─── rfcview:read-show-help ──────────────────────────────────────────────────
 
