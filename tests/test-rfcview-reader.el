@@ -206,6 +206,23 @@ also match — this test documents the case-sensitive-only behavior."
     (should (eq 'rfcview:read-rfc-section-face
                 (rfcview-test:face-at-string "8.1.  Normative References")))))
 
+(ert-deftest rfcview:test-read-fontify-header-with-bom ()
+  "Header face is applied when the document begins with a BOM-only line before the header.
+Recent RFC documents sometimes begin with a bare U+FEFF on the first line."
+  (with-temp-buffer
+    (insert (string ?﻿))
+    (insert "\n")
+    (insert "Network Working Group                                   J. Author\n"
+            "Request for Comments: 9999                           Some Corp.\n"
+            "\n"
+            "\n"
+            "                       A Sample Protocol\n"
+            "\n"
+            "Abstract\n\n   Body.\n")
+    (rfcview:read-fontify)
+    (should (eq 'rfcview:read-rfc-header-face
+                (rfcview-test:face-at-string "Network Working Group")))))
+
 (ert-deftest rfcview:test-read-fontify-body-text-has-no-fontify-face ()
   "Body paragraph text does not get any of the rfcview fontify faces."
   (with-temp-buffer
@@ -255,6 +272,28 @@ also match — this test documents the case-sensitive-only behavior."
                   (save-excursion
                     (goto-char (point-min))
                     (skip-chars-forward " \t\n")
+                    (point)))))))
+
+(ert-deftest rfcview:test-read-trim-leading-blanks-hides-bom-with-blank-lines ()
+  "Creates an invisible overlay when a BOM precedes leading blank lines."
+  (with-temp-buffer
+    (insert (string ?﻿))
+    (insert "\n\nFirst real content.\n")
+    (rfcview:read-trim-leading-blanks)
+    (should (rfcview-test:invisible-overlays-in (current-buffer)))))
+
+(ert-deftest rfcview:test-read-trim-leading-blanks-bom-overlay-ends-before-content ()
+  "The overlay over a BOM+blank-line prefix ends at or before the first real char."
+  (with-temp-buffer
+    (insert (string ?﻿))
+    (insert "\n\nContent.\n")
+    (rfcview:read-trim-leading-blanks)
+    (let ((ov (car (rfcview-test:invisible-overlays-in (current-buffer)))))
+      (should (= (point-min) (overlay-start ov)))
+      (should (<= (overlay-end ov)
+                  (save-excursion
+                    (goto-char (point-min))
+                    (skip-chars-forward " \t\n﻿")
                     (point)))))))
 
 ;;; ─── rfcview:read-hide-page-breaks ──────────────────────────────────────────
@@ -568,6 +607,19 @@ one blank line is left visible (overlay ends before it)."
           (let ((buf (rfcview:open-rfc-txt 3 tmp)))
             (unwind-protect
                 (should-not (buffer-modified-p buf))
+              (kill-buffer buf))))
+      (delete-file tmp))))
+
+(ert-deftest rfcview:test-open-rfc-txt-enables-goto-address-mode ()
+  "open-rfc-txt enables goto-address-mode in the RFC buffer."
+  (let ((tmp (make-temp-file "rfcview-test-" nil ".txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp (insert "Content.\n"))
+          (let ((buf (rfcview:open-rfc-txt 5 tmp)))
+            (unwind-protect
+                (with-current-buffer buf
+                  (should goto-address-mode))
               (kill-buffer buf))))
       (delete-file tmp))))
 
