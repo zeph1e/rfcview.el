@@ -96,7 +96,7 @@ PDF viewing requires pdf-tools."
   '((((class color) (min-colors 88) (background dark))
      (:foreground "gainsboro"))
     (((class color) (min-colors 88) (background light))
-     (:foreground "dark gray"))
+     (:foreground "grey23"))
     (((class color) (background dark))
      (:foreground "white"))
     (((class color) (background light))
@@ -148,7 +148,7 @@ PDF viewing requires pdf-tools."
   '((((class color) (background dark))
      (:foreground "cyan" :underline t))
     (((class color) (background light))
-     (:foreground "cyan" :underline t))
+     (:foreground "darkcyan" :underline t))
     (t (:bold t)))
   "Face used to highlight button in the *RFC INDEX* buffer."
   :group 'rfcview)
