@@ -85,7 +85,7 @@ PDF viewing requires pdf-tools."
     (((class color) (min-colors 88) (background light))
      (:foreground "dark violet"))
     (((class color) (background dark))
-     (:foreground "yellow"))
+     (:foreground "red"))
     (((class color) (background light))
      (:foreground "magenta"))
     (t (:bold t)))

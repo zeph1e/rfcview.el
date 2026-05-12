@@ -57,22 +57,23 @@
    ;; Appendix headings are unambiguous so only the first line is matched;
    ;; this handles titles that wrap to a second indented continuation line.
    ;; Appendix (modern): "Appendix A.  Title (possibly wrapped)"
-   "\\|^\nAppendix [A-Z]\\.[ \t]+[A-Z][^\n]*\n"
+   "\\|^\nAppendix [A-Z]\\.[ \t]+[A-Z][^\n]*\n\n"
    ;; Appendix (RFC 791 era, all-caps colon): "APPENDIX A:  Title"
-   "\\|^\nAPPENDIX [A-Z]:[ \t]+[A-Z][^\n]*\n"
+   "\\|^\nAPPENDIX [A-Z]:[ \t]+[A-Z][^\n]*\n\n"
+   "\\|^\nAPPENDIX [IVX]+[ \t]+-[ \t]+[A-Z][^\n]*\n\n"
    ;; Appendix subsection: "A.1.  Title" / "B.10 Title"  (1-2 digit number to avoid X.509 false hits)
-   "\\|^\n[A-Z]\\.[0-9]\\{1,2\\}\\.?[ \t]+[A-Z][^\n]*\n"
+   "\\|^\n[A-Z]\\.[0-9]\\{1,2\\}\\.?[ \t]+[A-Z][^\n]*\n\n"
    ;; ALL-CAPS bare-word headings (RFC 854/959/1122 era):
    ;; "INTRODUCTION" / "GENERAL CONSIDERATIONS" / "LINK LAYER REFERENCES"
-   "\\|^\n[A-Z][A-Z() ]\\{,50\\}[A-Z]\n"
+   "\\|^\n[A-Z][A-Z() ]\\{,50\\}[A-Z]\n\n"
    ;; Colon follows (RFC 42)
-   "\\|^\n[ ]\\{,3\\}[A-Z ]+:\n\n"
+   "\\|^\n[ ]\\{,3\\}[A-Z][A-Z ]+:\n\n"
    ;; Mixed-case standalone keyword headings
-   "\\|^\nAcknowledgements?[^\n]*\n"
-   "\\|^\nAuthors' Addresses?[^\n]*\n"
-   "\\|^\nAbstract[^\n]*\n"
+   "\\|^\nAcknowledgements?[^\n]*\n\n"
+   "\\|^\nAuthors' Addresses?[^\n]*\n\n"
+   "\\|^\nAbstract[^\n]*\n\n"
    ;; Dash-underline style (RFC 768 era): "Introduction\n------------\n"
-   "\\|^\n[ ]*[A-Z][a-zA-Z0-9. ]+\n[ ]*-\\{3,\\}\n")
+   "\\|^\n[ ]*[A-Z][a-zA-Z0-9. ]+\n[ ]*-\\{3,\\}\n\n")
   "Regexp matching RFC section headings across all eras, preceded by a blank line.")
 
 (defun rfcview:section-heading-search (bound)
@@ -115,6 +116,10 @@ References\" cause the second heading to be missed."
     ;; section navigation
     (define-key map (kbd "]") 'rfcview:read-next-section)
     (define-key map (kbd "[") 'rfcview:read-prev-section)
+
+    ;; button navigation
+    (define-key map (kbd "<tab>") 'forward-button)
+    (define-key map (kbd "<backtab>") 'backward-button)
 
     ;; font scale
     (define-key map (kbd "0") 'text-scale-adjust)
@@ -200,11 +205,13 @@ line from the top margin is left visible so navigation works correctly."
       (let* ((ff-pos (1- (point)))
              (footer-bol (save-excursion
                            (goto-char ff-pos)
-                           (forward-line -1)
+                           (if (bolp)
+                               (forward-line -1)
+                             (beginning-of-line))
                            (point))))
         (when (save-excursion
                 (goto-char footer-bol)
-                (looking-at ".*\\[Page [0-9]+\\]"))
+                (looking-at ".*\\[Page [0-9]+\\]\\|[ \t]+- ?[0-9]+ ?-[ \t]*"))
           (let* ((start (save-excursion
                           (goto-char footer-bol)
                           (if (re-search-backward "[^ \t\n]" nil t)
@@ -213,23 +220,17 @@ line from the top margin is left visible so navigation works correctly."
                  (end (save-excursion
                         (goto-char ff-pos)
                         (forward-line)
-                        (when (looking-at (format ".*RFC.*%d.*"
-                                                rfcview:read-rfc-number))
+                        (when (looking-at (concat
+                                           (format ".*RFC.*%d.*"
+                                                   rfcview:read-rfc-number)
+                                           "\\|[A-Z][A-Z ]+ \\{10,\\}[A-Z ]+"))
                             (forward-line))
-                        (let (last-blank)
-                          (while (and (not (eobp))
-                                      (looking-at "^[ \t]*$"))
-                            (setq last-blank (point))
-                            (forward-line 1))
-                          ;; Leave one real blank line visible before a section
-                          ;; heading so that line-move navigation works correctly.
-                          (when (and last-blank
-                                     (not (eobp))
-                                     (save-excursion
-                                       (goto-char (1- (point)))
-                                       (looking-at rfcview:section-heading-regexp)))
-                            (goto-char last-blank)))
-                        (point))))
+                        (apply #'min
+                               (delq nil `(,(save-excursion
+                                              (when (looking-at "^[ \t]*$")
+                                                (re-search-forward "^[^ \t]+$" nil t))
+                                              (point))
+                                           ,(point-max)))))))
             (when (< start end)
               (let ((ov (make-overlay start end)))
                 (overlay-put ov 'invisible t)
@@ -291,6 +292,7 @@ line from the top margin is left visible so navigation works correctly."
       (insert "    j / k       next / previous line\n")
       (insert "    h / l       backward / forward char\n")
       (insert "    ] / [       next / previous section\n")
+      (insert "    TAB / S-TAB next / previous button\n")
       (insert "    RET         follow link\n\n")
       (insert "  View\n")
       (insert "    + / = / -   increase / reset / decrease text scale\n")
@@ -321,7 +323,7 @@ line from the top margin is left visible so navigation works correctly."
   (unless rfcview:read-source-file
     (error "Source file path not recorded for this buffer"))
   (let ((buf (find-file-noselect rfcview:read-source-file)))
-    (with-current-buffer buf (text-mode))
+    (with-current-buffer buf (text-mode) (read-only-mode))
     (pop-to-buffer buf)))
 
 (defun rfcview:open-rfc-txt (number file)

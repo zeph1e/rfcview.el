@@ -70,44 +70,48 @@
   (should (rfcview-test:matches-heading "\nIV.  Overview\n\n")))
 
 (ert-deftest rfcview:test-section-heading-regexp-appendix-modern ()
-  "Matches modern 'Appendix A.  Title\\n' heading."
-  (should (rfcview-test:matches-heading "\nAppendix A.  Sample Appendix\n")))
+  "Matches modern 'Appendix A.  Title\\n\\n' heading."
+  (should (rfcview-test:matches-heading "\nAppendix A.  Sample Appendix\n\n")))
 
 (ert-deftest rfcview:test-section-heading-regexp-appendix-all-caps ()
-  "Matches RFC-791-era 'APPENDIX A:  Title\\n' heading."
-  (should (rfcview-test:matches-heading "\nAPPENDIX A:  Protocol Specification\n")))
+  "Matches RFC-791-era 'APPENDIX A:  Title\\n\\n' heading."
+  (should (rfcview-test:matches-heading "\nAPPENDIX A:  Protocol Specification\n\n")))
+
+(ert-deftest rfcview:test-section-heading-regexp-appendix-roman-numeral ()
+  "Matches RFC-172-era 'APPENDIX IV - Title\\n\\n' Roman-numeral appendix heading."
+  (should (rfcview-test:matches-heading "\nAPPENDIX IV - THE SPECIFICATION\n\n")))
 
 (ert-deftest rfcview:test-section-heading-regexp-appendix-subsection ()
-  "Matches 'A.1.  Title\\n' appendix subsection heading."
-  (should (rfcview-test:matches-heading "\nA.1.  First Appendix Section\n")))
+  "Matches 'A.1.  Title\\n\\n' appendix subsection heading."
+  (should (rfcview-test:matches-heading "\nA.1.  First Appendix Section\n\n")))
 
 (ert-deftest rfcview:test-section-heading-regexp-all-caps-bare-word ()
-  "Matches all-caps bare-word headings like 'INTRODUCTION\\n'."
-  (should (rfcview-test:matches-heading "\nINTRODUCTION\n")))
+  "Matches all-caps bare-word headings like 'INTRODUCTION\\n\\n'."
+  (should (rfcview-test:matches-heading "\nINTRODUCTION\n\n")))
 
 (ert-deftest rfcview:test-section-heading-regexp-all-caps-multi-word ()
-  "Matches multi-word all-caps heading 'GENERAL CONSIDERATIONS\\n'."
-  (should (rfcview-test:matches-heading "\nGENERAL CONSIDERATIONS\n")))
+  "Matches multi-word all-caps heading 'GENERAL CONSIDERATIONS\\n\\n'."
+  (should (rfcview-test:matches-heading "\nGENERAL CONSIDERATIONS\n\n")))
 
 (ert-deftest rfcview:test-section-heading-regexp-acknowledgements ()
-  "Matches 'Acknowledgements\\n' heading."
-  (should (rfcview-test:matches-heading "\nAcknowledgements\n")))
+  "Matches 'Acknowledgements\\n\\n' heading."
+  (should (rfcview-test:matches-heading "\nAcknowledgements\n\n")))
 
 (ert-deftest rfcview:test-section-heading-regexp-acknowledgment-variant ()
-  "Matches 'Acknowledgment\\n' (US spelling without 'e')."
-  (should (rfcview-test:matches-heading "\nAcknowledgment\n")))
+  "Matches 'Acknowledgment\\n\\n' (US spelling without 'e')."
+  (should (rfcview-test:matches-heading "\nAcknowledgment\n\n")))
 
 (ert-deftest rfcview:test-section-heading-regexp-authors-addresses ()
-  "Matches 'Authors\\' Addresses\\n' heading."
-  (should (rfcview-test:matches-heading "\nAuthors' Addresses\n")))
+  "Matches 'Authors\\' Addresses\\n\\n' heading."
+  (should (rfcview-test:matches-heading "\nAuthors' Addresses\n\n")))
 
 (ert-deftest rfcview:test-section-heading-regexp-abstract ()
-  "Matches 'Abstract\\n' heading."
-  (should (rfcview-test:matches-heading "\nAbstract\n")))
+  "Matches 'Abstract\\n\\n' heading."
+  (should (rfcview-test:matches-heading "\nAbstract\n\n")))
 
 (ert-deftest rfcview:test-section-heading-regexp-dash-underline ()
   "Matches dash-underline style heading."
-  (should (rfcview-test:matches-heading "\nIntroduction\n------------\n")))
+  (should (rfcview-test:matches-heading "\nIntroduction\n------------\n\n")))
 
 (ert-deftest rfcview:test-section-heading-regexp-rejects-list-item ()
   "Does NOT match a multi-line list item beginning with a number (no trailing \\n\\n)."
@@ -332,6 +336,19 @@ also match — this test documents the case-sensitive-only behavior."
     (insert "Content.\n\f\nNext page.\n")
     (rfcview:read-hide-page-breaks)
     (should (null (rfcview-test:invisible-overlays-in (current-buffer))))))
+
+(ert-deftest rfcview:test-read-hide-page-breaks-recognizes-dash-number-footer ()
+  "Hides page breaks preceded by a dash-number footer (e.g. '  - 3 -')."
+  (with-temp-buffer
+    (insert (concat "Content on page 3.\n"
+                    "\n"
+                    "                                  - 3 -\n"
+                    "\f\n"
+                    "Old RFC Header Line\n"
+                    "\n"
+                    "Content on page 4.\n"))
+    (rfcview:read-hide-page-breaks)
+    (should (rfcview-test:invisible-overlays-in (current-buffer)))))
 
 (ert-deftest rfcview:test-read-hide-page-breaks-content-visible-after-break ()
   "Content after the page break is not covered by the overlay.
@@ -618,7 +635,7 @@ one blank line is left visible (overlay ends before it)."
     (should-error (rfcview:read-view-original))))
 
 (ert-deftest rfcview:test-read-view-original-opens-source-file ()
-  "Opens the source file in text-mode in a new buffer."
+  "Opens the source file in text-mode in a read-only buffer."
   (let ((tmp (make-temp-file "rfcview-test-" nil ".txt")))
     (unwind-protect
         (progn
@@ -629,11 +646,11 @@ one blank line is left visible (overlay ends before it)."
                   (cl-letf (((symbol-function 'pop-to-buffer) #'ignore))
                     (with-current-buffer read-buf
                       (rfcview:read-view-original)))
-                  ;; The source file should now be visiting in a buffer
                   (let ((src-buf (find-buffer-visiting tmp)))
                     (should src-buf)
                     (with-current-buffer src-buf
-                      (should (eq major-mode 'text-mode)))
+                      (should (eq major-mode 'text-mode))
+                      (should buffer-read-only))
                     (kill-buffer src-buf)))
               (kill-buffer read-buf))))
       (delete-file tmp))))
@@ -699,19 +716,21 @@ that regex fails to match a line that contains only \\r (from CRLF)."
 (ert-deftest rfcview:test-read-show-help-keys-match-keymap ()
   "Every key listed in the read help buffer is bound as documented in the keymap."
   (let ((m rfcview:read-mode-map))
-    (should (eq  (lookup-key m (kbd "j"))   'next-line))
-    (should (eq  (lookup-key m (kbd "k"))   'previous-line))
-    (should      (lookup-key m (kbd "h")))   ; lambda — just check bound
-    (should      (lookup-key m (kbd "l")))   ; lambda — just check bound
-    (should (eq  (lookup-key m (kbd "]"))   'rfcview:read-next-section))
-    (should (eq  (lookup-key m (kbd "["))   'rfcview:read-prev-section))
-    (should (eq  (lookup-key m (kbd "RET")) 'push-button))
-    (should (eq  (lookup-key m (kbd "+"))   'text-scale-adjust))
-    (should (eq  (lookup-key m (kbd "="))   'text-scale-adjust))
-    (should (eq  (lookup-key m (kbd "-"))   'text-scale-adjust))
-    (should (eq  (lookup-key m (kbd "o"))   'rfcview:read-view-original))
-    (should (eq  (lookup-key m (kbd "q"))   'rfcview:read-quit))
-    (should (eq  (lookup-key m (kbd "?"))   'rfcview:read-show-help))))
+    (should (eq  (lookup-key m (kbd "j"))         'next-line))
+    (should (eq  (lookup-key m (kbd "k"))         'previous-line))
+    (should      (lookup-key m (kbd "h")))         ; lambda — just check bound
+    (should      (lookup-key m (kbd "l")))         ; lambda — just check bound
+    (should (eq  (lookup-key m (kbd "]"))         'rfcview:read-next-section))
+    (should (eq  (lookup-key m (kbd "["))         'rfcview:read-prev-section))
+    (should (eq  (lookup-key m (kbd "<tab>"))     'forward-button))
+    (should (eq  (lookup-key m (kbd "<backtab>")) 'backward-button))
+    (should (eq  (lookup-key m (kbd "RET"))       'push-button))
+    (should (eq  (lookup-key m (kbd "+"))         'text-scale-adjust))
+    (should (eq  (lookup-key m (kbd "="))         'text-scale-adjust))
+    (should (eq  (lookup-key m (kbd "-"))         'text-scale-adjust))
+    (should (eq  (lookup-key m (kbd "o"))         'rfcview:read-view-original))
+    (should (eq  (lookup-key m (kbd "q"))         'rfcview:read-quit))
+    (should (eq  (lookup-key m (kbd "?"))         'rfcview:read-show-help))))
 
 ;;; ─── rfcview:read-quit ───────────────────────────────────────────────────────
 
