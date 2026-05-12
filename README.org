@@ -17,7 +17,7 @@
 - Rich read mode:
   - Applying style to RFC document
   - Jump by section
-  - Seamless page break looks like document in one piece.
+  - Seamless page breaks; looks like one continuous page
 
 
 * Installation
@@ -85,7 +85,7 @@ In an RFC read buffer:
 
 ** PDF Fallback
 
-Some RFCs are only present as PDF (e.g. RFC 8).  rfcview automatically falls back to PDF when a plain-text edition returns a 404 response, and also checks for a locally cached =.pdf= file before attempting a download.
+Some RFCs only present as PDF (e.g. RFC 8).  rfcview automatically falls back to PDF when a plain-text edition returns a 404 response, and also checks for a locally cached =.pdf= file before attempting a download.
 
 Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]].  rfcview does not declare a hard dependency on it; if pdf-tools is not installed, opening a PDF-only RFC signals an error.  Example setups:
 
@@ -97,7 +97,7 @@ Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]].  rfcvi
   (pdf-tools-install :no-query))
 #+END_SRC
 
-** PDF Only
+** Forcing PDF Only
 
 To always open RFCs as PDF (even when a plain-text edition exists), customize =rfcview:preferred-format=:
 

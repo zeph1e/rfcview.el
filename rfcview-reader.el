@@ -76,22 +76,6 @@
    "\\|^\n[ ]*[A-Z][a-zA-Z0-9. ]+\n[ ]*-\\{3,\\}\n\n")
   "Regexp matching RFC section headings across all eras, preceded by a blank line.")
 
-(defun rfcview:section-heading-search (bound)
-  "Font-lock search function for section headings.
-After a match that ends with \\n\\n (trailing blank line consumed), backs up
-by one so the blank line is available as the leading blank for the next heading.
-Without this, adjacent headings like \"8.  References\" / \"8.1.  Normative
-References\" cause the second heading to be missed."
-  (when (re-search-forward rfcview:section-heading-regexp bound t)
-    (when (and (>= (match-end 0) 2)
-               (eq (char-before (match-end 0)) ?\n)
-               (eq (char-before (1- (match-end 0))) ?\n))
-      (goto-char (1- (match-end 0)))
-      (let ((md (match-data)))
-        (setcar (nthcdr 1 md) (point))
-        (set-match-data md)))
-    t))
-
 (defconst rfcview:open-rfc-functions '((txt . rfcview:open-rfc-txt)
                                        (pdf . rfcview:open-rfc-pdf)))
 
