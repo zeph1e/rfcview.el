@@ -356,13 +356,24 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
 ;;; ─── rfcview:make-entry-line ─────────────────────────────────────────────────
 
 (ert-deftest rfcview:test-make-entry-line-contains-rfc-number ()
-  "Entry line contains the zero-padded RFC number."
+  "Entry line encodes the RFC number in a left-margin display property."
   (let ((rfcview:use-face nil)
         (rfcview:use-debug nil)
         (rfcview:index-filter nil))
-    (let ((line (rfcview:make-entry-line 793 "TCP" "1981" '("J. Postel")
-                                         nil nil nil nil nil)))
-      (should (string-match-p "0793" line)))))
+    (let* ((line (rfcview:make-entry-line 793 "TCP" "1981" '("J. Postel")
+                                          nil nil nil nil nil))
+           found)
+      ;; Walk every display-property span, including position 0 where the
+      ;; left-margin carrier lives (next-single-property-change would skip it).
+      (let ((pos 0))
+        (while (and (not found) (< pos (length line)))
+          (let* ((disp (get-text-property pos 'display line))
+                 (str  (and (consp disp) (cadr disp))))
+            (when (and (stringp str) (string-match-p "793" str))
+              (setq found t)))
+          (setq pos (or (next-single-property-change pos 'display line)
+                        (length line)))))
+      (should found))))
 
 (ert-deftest rfcview:test-make-entry-line-contains-title ()
   "Entry line contains the RFC title."
@@ -421,7 +432,7 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
         (rfcview:favorite-symbol ?*))
     (let ((line (rfcview:make-entry-line 793 "TCP" "1981" '("J. Postel")
                                          nil nil nil nil nil)))
-      (should (string-match-p "0793 " line)))))
+      (should-not (string-match-p "\\*" line)))))
 
 (ert-deftest rfcview:test-make-entry-line-shows-obsoletes-trait ()
   "Entry line includes 'Obsoletes' when the obsoletes list is non-nil."
@@ -491,8 +502,7 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
                                    (rfcview-test:make-table
                                     '(793 . (:title "TCP" :date "1981" :authors ("J. Postel"))))
                                    nil nil))
-          (goto-char (point-min))
-          (search-forward "0793")
+          (rfcview:index-goto-number 793)
           (rfcview:index-toggle-favorite)
           (should (member 793 (plist-get rfcview:rfc-cache :favorite))))
       (kill-buffer buf))))
@@ -508,8 +518,7 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
         (with-current-buffer buf
           (setq rfcview:rfc-cache
                 (rfcview-test:make-cache tbl '(793) nil))
-          (goto-char (point-min))
-          (search-forward "0793")
+          (rfcview:index-goto-number 793)
           (rfcview:index-toggle-favorite)
           (should-not (member 793 (plist-get rfcview:rfc-cache :favorite))))
       (kill-buffer buf))))
@@ -618,9 +627,7 @@ Mocks rfcview:refresh-index so no window operations occur."
             (setq rfcview:index-current-list-items '(1 793))
             (goto-char (point-min))
             (rfcview:index-goto-number 793)
-            (let ((line (buffer-substring-no-properties
-                         (line-beginning-position) (line-end-position))))
-              (should (string-match-p "0793" line))))
+            (should (eql (get-text-property (point) 'rfcview:number) 793)))
         (kill-buffer buf)))))
 
 (ert-deftest rfcview:test-index-goto-number-errors-for-missing-rfc ()
@@ -688,6 +695,102 @@ Mocks rfcview:refresh-index so no window operations occur."
     (should (eq (lookup-key m (kbd "g"))         'rfcview:index-refresh-screen))
     (should (eq (lookup-key m (kbd "q"))         'bury-buffer))
     (should (eq (lookup-key m (kbd "?"))         'rfcview:index-show-help))))
+
+;;; ─── rfcview:move-entry-highlight ────────────────────────────────────────────
+
+(defmacro rfcview-test:with-highlighted-index (entries lmw &rest body)
+  "Run BODY with a displayed index buffer whose selected entry is RFC 793.
+ENTRIES is an alist passed to `rfcview-test:build-index-buffer'.
+LMW is the left-margin-width to set."
+  (declare (indent 2))
+  `(let ((buf (rfcview-test:build-index-buffer ,entries)))
+     (unwind-protect
+         (save-window-excursion
+           (set-window-buffer (selected-window) buf)
+           (with-current-buffer buf
+             (setq rfcview:index-current-list-items
+                   (mapcar #'car ,entries))
+             (set (make-local-variable 'rfcview:background-highlight-overlay) nil)
+             (set (make-local-variable 'rfcview:margin-highlight-overlays) nil)
+             (setq left-margin-width ,lmw
+                   right-margin-width 15)
+             (rfcview:index-goto-number 793)
+             (rfcview:move-entry-highlight)
+             ,@body))
+       (kill-buffer buf))))
+
+(ert-deftest rfcview:test-move-entry-highlight-background-spans-entry ()
+  "Background highlight overlay is set and covers the selected entry text."
+  (rfcview-test:with-highlighted-index
+      '((793 . (:title "TCP" :date "1981" :authors ("J. Postel")))) 5
+    (should (overlayp rfcview:background-highlight-overlay))
+    (should (< (overlay-start rfcview:background-highlight-overlay)
+               (overlay-end   rfcview:background-highlight-overlay)))))
+
+(ert-deftest rfcview:test-move-entry-highlight-creates-left-margin-overlays ()
+  "Left-margin overlays are created with the entry-highlight face.
+Wrapped/author visual lines use a zero-width before-string overlay; the first
+visual line overrides the carrier character's display property instead."
+  (rfcview-test:with-highlighted-index
+      '((793 . (:title "TCP" :date "1981" :authors ("J. Postel")))) 5
+    ;; Author line (not the first visual line) uses a before-string overlay.
+    (let ((left-ovs
+           (seq-filter
+            (lambda (ov)
+              (let* ((bs  (overlay-get ov 'before-string))
+                     (d   (and bs (get-text-property 0 'display bs)))
+                     (str (and (consp d) (cadr d))))
+                (and (equal (car d) '(margin left-margin))
+                     (stringp str)
+                     (eq (get-text-property 0 'face str)
+                         'rfcview:entry-highlight-face))))
+            rfcview:margin-highlight-overlays)))
+      (should left-ovs))))
+
+(ert-deftest rfcview:test-move-entry-highlight-rfc-number-visible-in-left-margin ()
+  "RFC number stays visible in the left margin when the entry is highlighted.
+The first visual line's carrier character gets its display overridden (not
+prepended to), so the number is not pushed beyond the margin width."
+  (rfcview-test:with-highlighted-index
+      '((793 . (:title "TCP" :date "1981" :authors ("J. Postel")))) 5
+    (let ((carrier-ov
+           (seq-find
+            (lambda (ov)
+              (let* ((d   (overlay-get ov 'display))
+                     (str (and (consp d) (cadr d))))
+                (and (equal (car d) '(margin left-margin))
+                     (stringp str)
+                     (string-match-p "793" str))))
+            rfcview:margin-highlight-overlays)))
+      (should carrier-ov)
+      ;; Must span the carrier character, not be zero-width.
+      (should (= 1 (- (overlay-end carrier-ov) (overlay-start carrier-ov)))))))
+
+(ert-deftest rfcview:test-move-entry-highlight-creates-right-margin-overlays ()
+  "Right-margin overlays are created with the entry-highlight face."
+  (rfcview-test:with-highlighted-index
+      '((793 . (:title "TCP" :date "1981" :authors ("J. Postel")))) 5
+    (let ((right-ovs
+           (seq-filter
+            (lambda (ov)
+              (let* ((as  (overlay-get ov 'after-string))
+                     (d   (and as (get-text-property 0 'display as)))
+                     (str (and (consp d) (cadr d))))
+                (and (equal (car d) '(margin right-margin))
+                     (stringp str)
+                     (eq (get-text-property 0 'face str)
+                         'rfcview:entry-highlight-face))))
+            rfcview:margin-highlight-overlays)))
+      (should right-ovs))))
+
+(ert-deftest rfcview:test-move-entry-highlight-clears-overlays-on-update ()
+  "Calling rfcview:move-entry-highlight twice does not accumulate overlays."
+  (rfcview-test:with-highlighted-index
+      '((1   . (:title "RFC 1" :date "1969" :authors ("A")))
+        (793 . (:title "TCP"   :date "1981" :authors ("B")))) 5
+    (let ((count-first (length rfcview:margin-highlight-overlays)))
+      (rfcview:move-entry-highlight)
+      (should (= count-first (length rfcview:margin-highlight-overlays))))))
 
 (provide 'test-rfcview-index)
 ;;; test-rfcview-index.el ends here

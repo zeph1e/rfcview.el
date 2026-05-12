@@ -159,9 +159,17 @@ create the cache from scratch."
 (defun rfcview:make-entry-line (number title date authors obsoletes obsoleted-by
                                        updates updated-by favorite)
   "Make a propertized line containing a single RFC document information."
-  (let* ((margin-width 6)
+  (let* ((lmw (let ((v (if (and (boundp 'left-margin-width) left-margin-width)
+                            left-margin-width 0)))
+                (if (> v 0) v 5)))
+         (margin-width 2)
          (margin (make-string margin-width ?\s))
-         (num-str (format "%04d%c " number (if favorite rfcview:favorite-symbol ?\s)))
+         (num-display (format (format "%%%ds" lmw) number))
+         (num-carrier (propertize " " 'display
+                                  `((margin left-margin)
+                                    ,(if rfcview:use-face
+                                         (propertize num-display 'face 'rfcview:rfc-number-face)
+                                       num-display))))
          (traits (list (list :var obsoletes :text "Obsoletes")
                        (list :var obsoleted-by :text "Obsoleted by")
                        (list :var updates :text "Updates")
@@ -172,17 +180,18 @@ create the cache from scratch."
       (setq title (concat title (format " (relevance: %d)"
                                         (cdr (assoc number rfcview:filter-keyword-current-result))))))
 
-    (let* ((num-end (length num-str))
+    (let* ((fav-str (format "%c " (if favorite rfcview:favorite-symbol ?\s)))
+           (text-beg (1+ (length fav-str)))
            (margin-display (propertize " " 'display `((margin right-margin) " ")))
-           (title-str (concat num-str title margin-display"\n")))
+           (title-str (concat num-carrier fav-str title margin-display "\n")))
       (put-text-property 0 (length title-str) 'wrap-prefix margin title-str)
       (when rfcview:use-face
-        (put-text-property 0 num-end 'face 'rfcview:rfc-number-face title-str)
-        (put-text-property num-end (1- (length title-str)) 'face 'rfcview:rfc-title-face title-str)
+        (put-text-property 1 text-beg 'face 'rfcview:rfc-number-face title-str)
+        (put-text-property text-beg (1- (length title-str)) 'face 'rfcview:rfc-title-face title-str)
         (when (eq rfcview:index-filter 'rfcview:index-filter-function-keywords)
-          (let ((pos num-end))
+          (let ((pos text-beg))
             (dolist (keyword (split-string rfcview:filter-keyword-current-keyword nil t))
-              (setq pos num-end)
+              (setq pos text-beg)
               (while (string-match keyword title-str pos)
                 (put-text-property (match-beginning 0) (match-end 0)
                                    'face 'rfcview:rfc-selected-filter-face title-str)
@@ -327,10 +336,25 @@ create the cache from scratch."
           (search-forward-regexp (concat "\\(\\s-\\|" (regexp-quote history-header) "\\)+") nil 'noerror)
           (setq beg (point)))))))
 
+(defun rfcview:index-apply-window-settings ()
+  "Apply margin and fringe settings to the window showing the RFC index buffer."
+  (let ((win (get-buffer-window (current-buffer))))
+    (when win
+      (set-window-fringes win nil nil t)
+      (set-window-margins win left-margin-width right-margin-width))))
+
 (defun rfcview:refresh-index ()
   "Refresh RFC index."
   (rfcview:debug "refreshing...")
-  (set-window-fringes nil nil nil t)
+  (let* ((rfcview--index-table (plist-get rfcview:rfc-cache :table))
+         (rfcview--max-rfc (if (hash-table-p rfcview--index-table)
+                               (let ((mx 0))
+                                 (maphash (lambda (k _) (when (> k mx) (setq mx k)))
+                                          rfcview--index-table)
+                                 mx)
+                             9999)))
+    (setq left-margin-width (1+ (length (number-to-string rfcview--max-rfc))))
+    (rfcview:index-apply-window-settings))
   (let ((inhibit-read-only t)
         (saved-point (unless rfcview:suppress-recover-position
                        (save-excursion
@@ -453,12 +477,13 @@ create the cache from scratch."
                (backward-paragraph)
                (point)))
          (target (next-single-property-change at 'rfcview:number))
-         (moveto (save-excursion
-                   (when target
-                     (goto-char (point-min))
-                     (search-forward-regexp (format "^%04d\\(*\\| \\) " number) (point-max) t)
-                     (beginning-of-line)
-                     (point)))))
+         (moveto (let ((pos (point-min)) found)
+                   (while (and (not found)
+                               (setq pos (next-single-property-change
+                                          pos 'rfcview:number nil (point-max))))
+                     (when (eql (get-text-property pos 'rfcview:number) number)
+                       (setq found pos)))
+                   found)))
     (when moveto
       (goto-char moveto))))
 
@@ -493,13 +518,37 @@ create the cache from scratch."
               (save-excursion
                 (goto-char beg)
                 (while (< (point) end)
-                  (end-of-visual-line)
-                  (let ((ov (make-overlay (point) (point))))
-                    (overlay-put ov 'after-string
-                                 (propertize " " 'display
-                                             `((margin right-margin)
-                                               ,(propertize " " 'face 'rfcview:entry-highlight-face))))
-                    (push ov rfcview:margin-highlight-overlays))
+                  (let ((lmw      (or left-margin-width 0))
+                        (line-beg (point)))
+                    (end-of-visual-line)
+                    (let ((ov-r (make-overlay (point) (point))))
+                      (overlay-put ov-r 'after-string
+                                   (propertize " " 'display
+                                               `((margin right-margin)
+                                                 ,(propertize " " 'face 'rfcview:entry-highlight-face))))
+                      (push ov-r rfcview:margin-highlight-overlays))
+                    (if (eq line-beg beg)
+                        ;; First visual line: override the carrier character's display so the
+                        ;; RFC number stays visible under the highlight.  A before-string here
+                        ;; would concatenate with the carrier's own margin display and push the
+                        ;; number beyond the margin width, making it invisible.
+                        (let* ((num (get-text-property beg 'rfcview:number))
+                               (num-str (format (format "%%%ds" lmw) (or num "")))
+                               (ov-l (make-overlay beg (1+ beg))))
+                          (overlay-put ov-l 'display
+                                       `((margin left-margin)
+                                         ,(propertize num-str
+                                                      'face (if rfcview:use-face
+                                                                '(rfcview:rfc-number-face rfcview:entry-highlight-face)
+                                                              'rfcview:entry-highlight-face))))
+                          (push ov-l rfcview:margin-highlight-overlays))
+                      (let ((ov-l (make-overlay line-beg line-beg)))
+                        (overlay-put ov-l 'before-string
+                                     (propertize " " 'display
+                                                 `((margin left-margin)
+                                                   ,(propertize (make-string lmw ?\s)
+                                                                'face 'rfcview:entry-highlight-face))))
+                        (push ov-l rfcview:margin-highlight-overlays))))
                   (vertical-motion 1))))))))))
 
 (defun rfcview:index-read-item (&optional number)
@@ -671,6 +720,7 @@ Keybindings:
   (add-hook 'kill-buffer-hook 'rfcview:index-cleanup t t)
   (add-hook 'kill-emacs-hook 'rfcview:index-cleanup)
   (add-hook 'post-command-hook 'rfcview:move-entry-highlight t t)
+  (add-hook 'window-configuration-change-hook 'rfcview:index-apply-window-settings nil t)
   (run-hooks 'rfcview:index-mode-hook))
 
 (provide 'rfcview-index)
