@@ -143,7 +143,8 @@
     (save-excursion
       ;; Header block: from start to the first blank line
       (goto-char (point-min))
-      (let ((header-start (if (re-search-forward "^[^\n]+$" nil t)
+      ;; recent has \ufeff at the very early of document
+      (let ((header-start (if (re-search-forward "^[^\ufeff\n]+$" nil t) 
                               (line-beginning-position)
                             (point-min)))
             (header-end (if (re-search-forward "^[ \t]*$" nil t)
@@ -244,9 +245,9 @@ line from the top margin is left visible so navigation works correctly."
   "Hide blank lines at the very beginning of the RFC buffer."
   (let ((end (save-excursion
                (goto-char (point-min))
-               (while (and (not (eobp)) (looking-at "^[ \t]*$"))
-                 (forward-line 1))
-               (point))))
+               (if (re-search-forward "[^ \t\ufeff\n]" nil t)
+                   (1- (point))
+                 (point-min)))))
     (when (> end (point-min))
       (let ((ov (make-overlay (point-min) end)))
         (overlay-put ov 'invisible t)
@@ -299,6 +300,7 @@ line from the top margin is left visible so navigation works correctly."
   (rfcview:read-trim-leading-blanks)
   (rfcview:read-hide-page-breaks)
   (rfcview:read-buttonize-refs)
+  (goto-address-mode 1)
   (run-hooks 'rfcview-read-mode-hook))
 
 (defun rfcview:read-view-original ()
