@@ -1,21 +1,28 @@
-* rfcview
+#+TITLE: RFCVIEW
+#+AUTHOR: Yunsik Jang
+#+SETUPFILE: https://fniessen.github.io/org-html-themes/org/html-theme-readtheorg.setup
 
 *rfcview* is an Emacs tool for browsing, downloading, and reading IETF RFC documents inside Emacs. When you run *rfcview*, it updates the RFC index if necessary, then presents an interactive index buffer.
 
+#+CAPTION: Dark theme
 [[file:res/rfcview-dark.png]]
+#+CAPTION: Light theme
 [[file:res/rfcview-light.png]]
 
-** Features
+* Features
 
-- Browse the full IETF RFC index with RFC number in the left margin, author, date, and cross-reference links
+- Browse the full up-to-date IETF RFC index with fancy and informative look.
 - Filter by favorites, recently read, or keyword search (scored and ranked)
-- Download and cache RFC documents locally on first access
-- Rich read mode: section-heading highlighting, seamless page-break hiding (footer, form feed, running header, and padding lines are all suppressed so the document reads as continuous text), clickable =RFC XXXX= cross-references, and section navigation with =[= / =]=
-- Fast window resize — layout uses Emacs's built-in word-wrap engine, not pre-computed strings
+- Automatically download and display RFCs on demand.
+- Rich read mode:
+  - Applying style to RFC document
+  - Jump by section
+  - Seamless page break looks like document in one piece.
 
-** Installation
 
-*** use-package :vc (Emacs 30+)
+* Installation
+
+** use-package :vc (Emacs 30+)
 
 #+BEGIN_SRC emacs-lisp
 (use-package rfcview
@@ -23,7 +30,7 @@
   :commands rfcview)
 #+END_SRC
 
-*** use-package with straight.el
+** use-package with straight.el
 
 #+BEGIN_SRC emacs-lisp
 (use-package rfcview
@@ -31,14 +38,7 @@
   :commands rfcview)
 #+END_SRC
 
-*** straight.el
-
-#+BEGIN_SRC emacs-lisp
-(straight-use-package
- '(rfcview :host github :repo "zeph1e/rfcview.el" :files ("*.el")))
-#+END_SRC
-
-*** Manual
+** Manual
 
 Place all four =.el= files (=rfcview.el=, =rfcview-core.el=, =rfcview-index.el=, =rfcview-reader.el=) in the same directory and add:
 
@@ -48,7 +48,7 @@ Place all four =.el= files (=rfcview.el=, =rfcview-core.el=, =rfcview-index.el=,
 (autoload 'rfcview "rfcview" t t)
 #+END_SRC
 
-** Usage
+* Usage
 
 =M-x rfcview= opens the =*RFC INDEX*= buffer.
 
@@ -81,38 +81,15 @@ In an RFC read buffer:
 | =?=           | Help                            |
 | =q=           | Quit (refocus index if visible) |
 
-** PDF support
+* PDF support
 
-Some RFCs are only published as PDF (e.g. RFC 8).  rfcview automatically falls back to PDF when a plain-text edition returns a 404 response, and also checks for a locally cached =.pdf= file before attempting a download.
+** PDF Fallback
 
-To always open RFCs as PDF (even when a plain-text edition exists), set =rfcview:preferred-format=:
-
-#+BEGIN_SRC emacs-lisp
-(setq rfcview:preferred-format 'pdf)
-#+END_SRC
+Some RFCs are only present as PDF (e.g. RFC 8).  rfcview automatically falls back to PDF when a plain-text edition returns a 404 response, and also checks for a locally cached =.pdf= file before attempting a download.
 
 Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]].  rfcview does not declare a hard dependency on it; if pdf-tools is not installed, opening a PDF-only RFC signals an error.  Example setups:
 
 #+BEGIN_SRC emacs-lisp
-;; Emacs 30+ (use-package :vc)
-(use-package pdf-tools
-  :vc (:url "https://github.com/vedang/pdf-tools" :rev :newest)
-  :magic ("%PDF" . pdf-view-mode)
-  :config
-  (pdf-tools-install :no-query))
-#+END_SRC
-
-#+BEGIN_SRC emacs-lisp
-;; straight.el
-(use-package pdf-tools
-  :straight t
-  :magic ("%PDF" . pdf-view-mode)
-  :config
-  (pdf-tools-install :no-query))
-#+END_SRC
-
-#+BEGIN_SRC emacs-lisp
-;; MELPA (package.el)
 (use-package pdf-tools
   :ensure t
   :magic ("%PDF" . pdf-view-mode)
@@ -120,6 +97,17 @@ Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]].  rfcvi
   (pdf-tools-install :no-query))
 #+END_SRC
 
-** License
+** PDF Only
+
+To always open RFCs as PDF (even when a plain-text edition exists), customize =rfcview:preferred-format=:
+
+#+BEGIN_SRC emacs-lisp
+  (use-package rfcview
+    :vc (:url "https://github.com/zeph1e/rfcview.el" :rev :newest)
+    :commands rfcview
+    :custom (rfcview:preferred-format 'pdf))
+#+END_SRC
+
+* License
 
 [[http://www.wtfpl.net][WTFPL version 2]]
