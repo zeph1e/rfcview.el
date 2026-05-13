@@ -169,19 +169,52 @@ also match — this test documents the case-sensitive-only behavior."
     (should (eq 'rfcview:read-rfc-title-face
                 (rfcview-test:face-at-string "A Sample Protocol")))))
 
-(ert-deftest rfcview:test-read-fontify-no-title-when-non-indented ()
-  "Non-indented text after the header gap does not get rfcview:read-rfc-title-face."
+(ert-deftest rfcview:test-read-fontify-title-modern-single-line ()
+  "Left-aligned (non-indented) single-line title gets rfcview:read-rfc-title-face (RFC 9934 style)."
   (with-temp-buffer
-    (insert (concat "Author: J. Doe\n"
+    (insert (concat "ISSN: 2070-1721                                        J. Doe\n"
                     "\n"
-                    "Non-indented line\n"
                     "\n"
-                    "1.  Body\n"
+                    "Privacy-Enhanced Mail File Format for Encrypted ClientHello\n"
+                    "\n"
+                    "Abstract\n"
                     "\n"
                     "Content.\n"))
     (rfcview:read-fontify)
-    (should-not (eq 'rfcview:read-rfc-title-face
-                    (rfcview-test:face-at-string "Non-indented line")))))
+    (should (eq 'rfcview:read-rfc-title-face
+                (rfcview-test:face-at-string "Privacy-Enhanced Mail File Format")))))
+
+(ert-deftest rfcview:test-read-fontify-title-modern-wrapped ()
+  "Wrapped title whose first line is not indented gets rfcview:read-rfc-title-face on all lines (RFC 9935 style)."
+  (with-temp-buffer
+    (insert (concat "ISSN: 2070-1721                                        J. Doe\n"
+                    "\n"
+                    "\n"
+                    "Internet X.509 Public Key Infrastructure - Algorithm Identifiers\n"
+                    "       for the Module-Lattice-Based Key-Encapsulation Mechanism\n"
+                    "\n"
+                    "Abstract\n"
+                    "\n"
+                    "Content.\n"))
+    (rfcview:read-fontify)
+    (should (eq 'rfcview:read-rfc-title-face
+                (rfcview-test:face-at-string "Internet X.509")))
+    (should (eq 'rfcview:read-rfc-title-face
+                (rfcview-test:face-at-string "for the Module-Lattice")))))
+
+(ert-deftest rfcview:test-read-fontify-title-when-non-indented ()
+  "Non-indented text after the header gap gets rfcview:read-rfc-title-face (modern RFC style)."
+  (with-temp-buffer
+    (insert (concat "Author: J. Doe\n"
+                    "\n"
+                    "Non-Indented Title\n"
+                    "\n"
+                    "Abstract\n"
+                    "\n"
+                    "Content.\n"))
+    (rfcview:read-fontify)
+    (should (eq 'rfcview:read-rfc-title-face
+                (rfcview-test:face-at-string "Non-Indented Title")))))
 
 (ert-deftest rfcview:test-read-fontify-numeric-section-gets-section-face ()
   "Numeric section headings get rfcview:read-rfc-section-face."
