@@ -87,6 +87,14 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
     (let ((entry (rfcview:parse-index-entry (current-buffer))))
       (should (string-match-p "Host Software" (plist-get entry :title))))))
 
+(ert-deftest rfcview:test-parse-index-entry-title-no-trailing-dot ()
+  "Title does not include the trailing sentence period from the index format."
+  (with-temp-buffer
+    (insert rfcview-test:entry-rfc1)
+    (goto-char (point-min))
+    (let ((title (plist-get (rfcview:parse-index-entry (current-buffer)) :title)))
+      (should (string= "Host Software" title)))))
+
 (ert-deftest rfcview:test-parse-index-entry-authors ()
   "Parses authors from index entry."
   (with-temp-buffer

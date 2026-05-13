@@ -53,7 +53,10 @@ create the cache from scratch."
               (setq number (string-to-number (buffer-substring (line-beginning-position) (point))))
               (setq title (replace-regexp-in-string
                            "\\s-+" " "
-                           (buffer-substring (point) (search-forward-regexp "\\.\\s-+" end t))))
+                           (buffer-substring (point)
+                                             (progn
+                                               (search-forward-regexp "\\.\\s-+" end t)
+                                               (match-beginning 0)))))
               (setq authors (let (result candidate)
                               (dolist (auth (split-string
                                              (replace-regexp-in-string

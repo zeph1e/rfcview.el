@@ -85,6 +85,14 @@
   "Matches 'A.1.  Title\\n\\n' appendix subsection heading."
   (should (rfcview-test:matches-heading "\nA.1.  First Appendix Section\n\n")))
 
+(ert-deftest rfcview:test-section-heading-regexp-appendix-subsection-multi-level ()
+  "Matches multi-level appendix subsection heading 'A.1.3  Title\\n\\n'."
+  (should (rfcview-test:matches-heading "\nA.1.3  Detailed Subsection\n\n")))
+
+(ert-deftest rfcview:test-section-heading-regexp-appendix-subsection-multi-level-trailing-dot ()
+  "Matches multi-level appendix subsection heading with trailing dot 'A.1.3.  Title\\n\\n'."
+  (should (rfcview-test:matches-heading "\nA.1.3.  Detailed Subsection\n\n")))
+
 (ert-deftest rfcview:test-section-heading-regexp-all-caps-bare-word ()
   "Matches all-caps bare-word headings like 'INTRODUCTION\\n\\n'."
   (should (rfcview-test:matches-heading "\nINTRODUCTION\n\n")))
@@ -92,6 +100,10 @@
 (ert-deftest rfcview:test-section-heading-regexp-all-caps-multi-word ()
   "Matches multi-word all-caps heading 'GENERAL CONSIDERATIONS\\n\\n'."
   (should (rfcview-test:matches-heading "\nGENERAL CONSIDERATIONS\n\n")))
+
+(ert-deftest rfcview:test-section-heading-regexp-all-caps-hyphenated ()
+  "Matches all-caps heading containing a hyphen like 'NON-PRINTING CHARACTERS\\n\\n'."
+  (should (rfcview-test:matches-heading "\nNON-PRINTING CHARACTERS\n\n")))
 
 (ert-deftest rfcview:test-section-heading-regexp-acknowledgements ()
   "Matches 'Acknowledgements\\n\\n' heading."
@@ -104,6 +116,10 @@
 (ert-deftest rfcview:test-section-heading-regexp-authors-addresses ()
   "Matches 'Authors\\' Addresses\\n\\n' heading."
   (should (rfcview-test:matches-heading "\nAuthors' Addresses\n\n")))
+
+(ert-deftest rfcview:test-section-heading-regexp-author-singular-address ()
+  "Matches 'Author\\'s Address\\n\\n' (singular possessive) heading."
+  (should (rfcview-test:matches-heading "\nAuthor's Address\n\n")))
 
 (ert-deftest rfcview:test-section-heading-regexp-abstract ()
   "Matches 'Abstract\\n\\n' heading."

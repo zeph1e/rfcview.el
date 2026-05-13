@@ -52,6 +52,8 @@
    "\\|[IVX]+\\.?[ \t]+"
    ;; Roman numeral with dash: "I - INTRODUCTION"
    "\\|[IVX]+[ \t]*-[ \t]+"
+   ;; A.1.3
+   "\\|[A-Z]\\(?:\\.[0-9]\\{1,2\\}\\)+\\.?[ \t]+"
    "\\)"
    "[A-Z(\"][^,\n]*\n\n"
    ;; Appendix headings are unambiguous so only the first line is matched;
@@ -65,12 +67,12 @@
    "\\|^\n[A-Z]\\.[0-9]\\{1,2\\}\\.?[ \t]+[A-Z][^\n]*\n\n"
    ;; ALL-CAPS bare-word headings (RFC 854/959/1122 era):
    ;; "INTRODUCTION" / "GENERAL CONSIDERATIONS" / "LINK LAYER REFERENCES"
-   "\\|^\n[A-Z][A-Z() ]\\{,50\\}[A-Z]\n\n"
+   "\\|^\n[A-Z][-A-Z() ]\\{,50\\}[A-Z]\n\n"
    ;; Colon follows (RFC 42)
    "\\|^\n[ ]\\{,3\\}[A-Z][A-Z ]+:\n\n"
    ;; Mixed-case standalone keyword headings
    "\\|^\nAcknowledgements?[^\n]*\n\n"
-   "\\|^\nAuthors' Addresses?[^\n]*\n\n"
+   "\\|^\nAuthor\\(s'\\|'s\\) Address\\(es\\)?[^\n]*\n\n"
    "\\|^\nAbstract[^\n]*\n\n"
    ;; Dash-underline style (RFC 768 era): "Introduction\n------------\n"
    "\\|^\n[ ]*[A-Z][a-zA-Z0-9. ]+\n[ ]*-\\{3,\\}\n\n")
