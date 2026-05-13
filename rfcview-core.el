@@ -221,6 +221,7 @@ PDF viewing requires pdf-tools."
               (set-process-query-on-exit-flag process nil)
               (delete-process process)
               (error "HTTP error!"))
+          (set-buffer-multibyte t)      ; Fix latin chars get broken
           (current-buffer))))))
 
 (defun rfcview:http-response-status (buffer)
