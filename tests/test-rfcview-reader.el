@@ -346,6 +346,31 @@ Recent RFC documents sometimes begin with a bare U+FEFF on the first line."
     (rfcview:read-hide-page-breaks)
     (should (null (rfcview-test:invisible-overlays-in (current-buffer))))))
 
+(ert-deftest rfcview:test-read-hide-page-breaks-bare-formfeed-no-footer ()
+  "Hides a bare form-feed preceded only by a blank line (RFC 729 style).
+Content after the break must remain visible."
+  (with-temp-buffer
+    (setq rfcview:read-rfc-number 729)
+    (insert (concat "Content on page 1.\n"
+                    "\n"
+                    "\f\n"
+                    "RFC #729 Telnet Byte Macro Option                    Page 2\n"
+                    "\n"
+                    "\n"
+                    "Content on page 2.\n"))
+    (rfcview:read-hide-page-breaks)
+    (should (rfcview-test:invisible-overlays-in (current-buffer)))
+    (let* ((content-pos (save-excursion
+                          (goto-char (point-min))
+                          (search-forward "Content on page 2.")
+                          (match-beginning 0)))
+           (covered-p (cl-some (lambda (ov)
+                                 (and (overlay-get ov 'invisible)
+                                      (<= (overlay-start ov) content-pos)
+                                      (> (overlay-end ov) content-pos)))
+                               (overlays-in (point-min) (point-max)))))
+      (should-not covered-p))))
+
 (ert-deftest rfcview:test-read-hide-page-breaks-recognizes-dash-number-footer ()
   "Hides page breaks preceded by a dash-number footer (e.g. '  - 3 -')."
   (with-temp-buffer

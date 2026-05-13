@@ -198,7 +198,7 @@ line from the top margin is left visible so navigation works correctly."
                            (point))))
         (when (save-excursion
                 (goto-char footer-bol)
-                (looking-at ".*\\[Page [0-9]+\\]\\|[ \t]+- ?[0-9]+ ?-[ \t]*"))
+                (looking-at ".*\\[Page [0-9]+\\]\\|[ \t]+- ?[0-9]+ ?-[ \t]*\\|[ \t]*$"))
           (let* ((start (save-excursion
                           (goto-char footer-bol)
                           (if (re-search-backward "[^ \t\n]" nil t)
