@@ -515,14 +515,15 @@ or if the anchor tables are empty."
   (rfcview:read-buttonize-refs)
 
   ;; Load and uniform link button style w/ goto-address-mode
-  (make-variable-buffer-local 'goto-address-highlight-keymap)
-  (make-variable-buffer-local 'face-remapping-alist)
-  (setq face-remapping-alist
-        `((link ,(custom-face-attributes-get 'rfcview:button-face nil))))
   (goto-address-mode 1)
-  (let ((map goto-address-highlight-keymap))
-    (define-key map (kbd "RET") #'goto-address-at-point)
-    (define-key map (kbd "<mouse-1>")  #'goto-address-at-point))
+  (with-eval-after-load 'goto-addr
+    (make-variable-buffer-local 'goto-address-highlight-keymap)
+    (make-variable-buffer-local 'face-remapping-alist)
+    (setq face-remapping-alist
+          `((link ,(custom-face-attributes-get 'rfcview:button-face nil))))
+    (let ((map goto-address-highlight-keymap))
+      (define-key map (kbd "RET") #'goto-address-at-point)
+      (define-key map (kbd "<mouse-1>")  #'goto-address-at-point)))
   (run-hooks 'rfcview-read-mode-hook))
 
 (defun rfcview:read-view-original ()

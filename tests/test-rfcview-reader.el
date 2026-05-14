@@ -1367,10 +1367,6 @@ that regex fails to match a line that contains only \\r (from CRLF)."
 (ert-deftest rfcview:test-read-show-help-keys-match-keymap ()
   "Every key listed in the read help buffer is bound as documented in the keymap."
   (let ((m rfcview:read-mode-map))
-    (should (eq  (lookup-key m (kbd "j"))         'next-line))
-    (should (eq  (lookup-key m (kbd "k"))         'previous-line))
-    (should      (lookup-key m (kbd "h")))         ; lambda — just check bound
-    (should      (lookup-key m (kbd "l")))         ; lambda — just check bound
     (should (eq  (lookup-key m (kbd "]"))         'rfcview:read-next-section))
     (should (eq  (lookup-key m (kbd "["))         'rfcview:read-prev-section))
     (should (eq  (lookup-key m (kbd "<tab>"))     'forward-button))

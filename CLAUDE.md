@@ -95,7 +95,7 @@ On load of a text RFC, five post-processing steps run (in call order):
 
 After these steps, `goto-address-mode` is enabled to make bare URLs in the document clickable.
 
-Navigation keys: vi-style line/char movement (`h`/`j`/`k`/`l`), `]`/`[` for next/previous section heading, `TAB`/`S-TAB` for next/previous button (RFC cross-reference), `RET` to activate a button, `+`/`-`/`=`/`0` for `text-scale-adjust`, `o` to view the raw cached file, `?` opens `rfcview:read-show-help`. `q` runs `rfcview:read-quit`, which buries the buffer and selects the `*RFC INDEX*` window if it is visible in the current frame.
+Navigation keys: `n`/`p` for next/previous line, `]`/`[` for next/previous section heading, `TAB`/`S-TAB` for next/previous button (RFC cross-reference), `RET` to activate a button, `+`/`-`/`=`/`0` for `text-scale-adjust`, `o` to view the raw cached file, `?` opens `rfcview:read-show-help`. `q` runs `rfcview:read-quit`, which buries the buffer and selects the `*RFC INDEX*` window if it is visible in the current frame.
 
 ### rfcview.el — entry point
 

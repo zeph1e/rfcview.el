@@ -74,8 +74,6 @@ In an RFC read buffer:
 | =]= / =[=     | Next / previous section heading |
 | =TAB= / =S-TAB= | Next / previous RFC cross-reference |
 | =n= / =p=     | Next / previous line            |
-| =j= / =k=     | Next / previous line (vi)       |
-| =h= / =l=     | Backward / forward char (vi)    |
 | =+= / =-=     | Increase / decrease font size   |
 | =o=           | View raw cached file            |
 | =?=           | Help                            |
