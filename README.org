@@ -74,7 +74,7 @@ In an RFC read buffer:
 | Key       | Action                              |
 |-----------+-------------------------------------|
 | =]= / =[=       | Next / previous section heading       |
-| =TAB= / =S-TAB= | Next / previous RFC cross-reference   |
+| =TAB= / =S-TAB= | Next / previous link (RFC ref, TOC entry, URL) |
 | =RET=           | Follow link under point               |
 | =n= / =p=       | Next / previous line                  |
 | =b= / =f=       | Backward / forward char               |

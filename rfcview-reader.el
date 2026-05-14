@@ -121,9 +121,9 @@ or comma-bearing list items often begin with a single-segment number.")
     (define-key map (kbd "]") 'rfcview:read-next-section)
     (define-key map (kbd "[") 'rfcview:read-prev-section)
 
-    ;; button navigation
-    (define-key map (kbd "<tab>") 'forward-button)
-    (define-key map (kbd "<backtab>") 'backward-button)
+    ;; link navigation (buttons + goto-address URL overlays)
+    (define-key map (kbd "<tab>") 'rfcview:read-forward-link)
+    (define-key map (kbd "<backtab>") 'rfcview:read-backward-link)
 
     ;; font scale
     (define-key map (kbd "0") 'text-scale-adjust)
@@ -160,6 +160,50 @@ or comma-bearing list items often begin with a single-segment number.")
         (forward-line 1)
       (goto-char orig)
       (message "No previous section"))))
+
+(defun rfcview:read--link-positions ()
+  "Sorted list of start positions for every link in the buffer.
+Includes both `button' objects (RFC and TOC references) and
+`goto-address-mode' URL/email overlays."
+  (let (positions)
+    (let ((b (point-min)))
+      (while (setq b (next-button b))
+        (push (button-start b) positions)
+        (setq b (button-end b))))
+    (dolist (ov (overlays-in (point-min) (point-max)))
+      (when (overlay-get ov 'goto-address)
+        (push (overlay-start ov) positions)))
+    (sort (delete-dups positions) #'<)))
+
+(defun rfcview:read-forward-link (&optional n)
+  "Move to the next link after point.
+Considers both buttons and URLs highlighted by `goto-address-mode'.
+With prefix N, move N links forward; negative N moves backward."
+  (interactive "p")
+  (setq n (or n 1))
+  (let ((positions (rfcview:read--link-positions))
+        (pos (point)))
+    (cond
+     ((zerop n) nil)
+     ((> n 0)
+      (let ((rest positions))
+        (while (and rest (<= (car rest) pos)) (setq rest (cdr rest)))
+        (if (>= (length rest) n)
+            (goto-char (nth (1- n) rest))
+          (user-error "No next link"))))
+     (t
+      (let ((before nil) (m (- n)))
+        (dolist (p positions)
+          (when (< p pos) (push p before)))
+        (if (>= (length before) m)
+            (goto-char (nth (1- m) before))
+          (user-error "No previous link")))))))
+
+(defun rfcview:read-backward-link (&optional n)
+  "Move to the previous link before point.
+With prefix N, move N links backward."
+  (interactive "p")
+  (rfcview:read-forward-link (- (or n 1))))
 
 (defun rfcview:read--normalize-number (s)
   "Strip leading whitespace and trailing whitespace/dots/dashes from S."
@@ -487,7 +531,7 @@ or if the anchor tables are empty."
       (insert "    n / p       next / previous line\n")
       (insert "    b / f       backward / forward char\n")
       (insert "    ] / [       next / previous section\n")
-      (insert "    TAB / S-TAB next / previous button\n")
+      (insert "    TAB / S-TAB next / previous link (RFC ref, TOC entry, URL)\n")
       (insert "    RET         follow link\n\n")
       (insert "  View\n")
       (insert "    + / = / -   increase / reset / decrease text scale\n")
