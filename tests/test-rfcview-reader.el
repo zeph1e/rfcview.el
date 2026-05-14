@@ -133,6 +133,13 @@
   (should-not (rfcview-test:matches-heading
                "\n3.  Foo, bar.\n\n")))
 
+(ert-deftest rfcview:test-section-heading-regexp-top-level-with-commas ()
+  "Matches a top-level (X.) numbered heading with commas in the title
+\(RFC 9959 §2 style: \"Language, Notation, and Terms\").
+The non-period-last-char rule keeps sentence-shape list items rejected."
+  (should (rfcview-test:matches-heading
+           "\n2.  Language, Notation, and Terms\n\n")))
+
 (ert-deftest rfcview:test-section-heading-regexp-all-caps-bare-word ()
   "Matches all-caps bare-word headings like 'INTRODUCTION\\n\\n'."
   (should (rfcview-test:matches-heading "\nINTRODUCTION\n\n")))

@@ -70,6 +70,12 @@ Fallback lookup for TOC entries without a section number.")
    "\\|[A-Z]\\(?:\\.[0-9]\\{1,2\\}\\)+\\.?[ \t]+"
    "\\)"
    "[A-Z(\"][^,\n]*\n\n"
+   ;; Top-level (X.) numeric heading with commas in the title — e.g.
+   ;; RFC 9959 §2 "Language, Notation, and Terms".  The in-group-1 numeric
+   ;; alt rejects commas to block list items; this alt re-admits commas
+   ;; under the same non-period-last-char rule used for X.Y+ headings,
+   ;; which rejects single-line sentence-shape items like "3.  Foo, bar.".
+   "\\|^\n[0-9]+\\.[ \t]+[A-Z(\"][^\n]*[^.\n]\n\n"
    ;; Subsection titles (X.Y+ only) with commas in the title — e.g.
    ;; RFC 8698 §6.2 "Method for Delay, Loss, and Marking Ratio Estimation".
    ;; The in-group-1 numeric alt rejects commas to block multi-line list
@@ -104,8 +110,9 @@ Fallback lookup for TOC entries without a section number.")
   "Regexp matching RFC section headings across all eras, preceded by a blank line.
 Subsection titles (`X.Y' form and deeper) may contain commas (RFC 8698 §6.2)
 and may wrap onto an indented continuation line (RFC 8968 §2.6).  Top-level
-numbered titles (`X.') keep the strict one-line, no-comma rule, since multi-line
-or comma-bearing list items often begin with a single-segment number.")
+numbered titles (`X.') may contain commas only when the title does not end
+with a period (RFC 9959 §2 \"Language, Notation, and Terms\"); sentence-shape
+list items like \"3.  Foo, bar.\" are still rejected.")
 
 (defconst rfcview:open-rfc-functions '((txt . rfcview:open-rfc-txt)
                                        (pdf . rfcview:open-rfc-pdf)))
@@ -238,8 +245,9 @@ ALL-CAPS, Abstract, etc.)."
                marker rfcview:read-section-anchors-by-number)
       (puthash (rfcview:read--normalize-title (match-string 2 heading-line))
                marker rfcview:read-section-anchors-by-title))
-     ;; Wrapped subsection ("2.6.  Long Title...") — only line 1 is in heading-line.
-     ((string-match "\\`\\([0-9]+\\(?:\\.[0-9]+\\)+\\)\\.?[ \t]+\\(.*\\)" heading-line)
+     ;; Numeric heading matched outside group 1 (top-level X. with commas, or
+     ;; wrapped/comma-bearing X.Y+ subsection — only line 1 is in heading-line).
+     ((string-match "\\`\\([0-9]+\\(?:\\.[0-9]+\\)*\\)\\.?[ \t]+\\(.*\\)" heading-line)
       (puthash (match-string 1 heading-line)
                marker rfcview:read-section-anchors-by-number)
       (puthash (rfcview:read--normalize-title (match-string 2 heading-line))
