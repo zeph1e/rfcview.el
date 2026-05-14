@@ -114,19 +114,6 @@ or comma-bearing list items often begin with a single-segment number.")
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "p") 'previous-line)
     (define-key map (kbd "n") 'next-line)
-    (define-key map (kbd "f") 'forward-char)
-    (define-key map (kbd "a") 'beginning-of-line)
-
-    ;; vi navigation
-    (define-key map (kbd "j") 'next-line)
-    (define-key map (kbd "k") 'previous-line)
-    (define-key map (kbd "h") #'(lambda () (interactive)
-                                 (if (bolp) (error "Beginning of line")
-                                   (backward-char))))
-    (define-key map (kbd "l") #'(lambda () (interactive)
-                                  (if (eolp) (error "End of line")
-                                    (forward-char))))
-    (define-key map (kbd "?") 'rfcview:read-show-help)
 
     ;; section navigation
     (define-key map (kbd "]") 'rfcview:read-next-section)
@@ -141,8 +128,12 @@ or comma-bearing list items often begin with a single-segment number.")
     (define-key map (kbd "-") 'text-scale-adjust)
     (define-key map (kbd "+") 'text-scale-adjust)
     (define-key map (kbd "=") 'text-scale-adjust)
+
     (define-key map (kbd "RET") 'push-button)
+
     (define-key map (kbd "o") 'rfcview:read-view-original)
+
+    (define-key map (kbd "?") 'rfcview:read-show-help)
     (define-key map (kbd "q") 'rfcview:read-quit)
     map)
   "RFC read mode key map.")
@@ -506,6 +497,8 @@ or if the anchor tables are empty."
   (display-buffer "*RFC Help*"))
 
 (defun rfcview:read-mode (number file)
+  "Major mode for reading RFC NUMBER from cached FILE.
+\\{rfcview:read-mode-map}"
   (kill-all-local-variables)
   (use-local-map rfcview:read-mode-map)
   (setq mode-name "RFC"
@@ -520,7 +513,16 @@ or if the anchor tables are empty."
   ;; "RFC NNNN" fragment in the title; refs then skips already-buttoned ranges.
   (rfcview:read-buttonize-toc)
   (rfcview:read-buttonize-refs)
+
+  ;; Load and uniform link button style w/ goto-address-mode
+  (make-variable-buffer-local 'goto-address-highlight-keymap)
+  (make-variable-buffer-local 'face-remapping-alist)
+  (setq face-remapping-alist
+        `((link ,(custom-face-attributes-get 'rfcview:button-face nil))))
   (goto-address-mode 1)
+  (let ((map goto-address-highlight-keymap))
+    (define-key map (kbd "RET") #'goto-address-at-point)
+    (define-key map (kbd "<mouse-1>")  #'goto-address-at-point))
   (run-hooks 'rfcview-read-mode-hook))
 
 (defun rfcview:read-view-original ()
