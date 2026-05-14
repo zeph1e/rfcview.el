@@ -259,18 +259,25 @@ create the cache from scratch."
                             'help-echo (plist-get rfc :title)))))))
 
 (defun rfcview:maphash-with-filter (function table &optional filter)
-  (if filter
-      (progn
-        (setq rfcview:index-current-list-items filter)
-        (dolist (key (funcall filter))
-          (let ((value (gethash key table)))
-            (when value
-              (apply function (list key value))))))
-    (setq rfcview:index-current-list-items nil)
-    (maphash (lambda (key value)
-               (push key rfcview:index-current-list-items)
-               (apply function (list key value)))
-               table)))
+  ;; rfcview:index-sort-order only applies to All (filter=nil) and Favorites;
+  ;; Recents preserves chronological order and Keywords preserves score order.
+  (let* ((sortable (or (null filter)
+                       (eq filter 'rfcview:index-filter-function-favorite)))
+         (sort-fn (if (eq rfcview:index-sort-order 'ascending) #'< #'>))
+         (keys (cond
+                ((null filter)
+                 (let (ks)
+                   (maphash (lambda (k _v) (push k ks)) table)
+                   (sort ks sort-fn)))
+                (sortable
+                 (sort (copy-sequence (funcall filter)) sort-fn))
+                (t
+                 (funcall filter)))))
+    (setq rfcview:index-current-list-items keys)
+    (dolist (key keys)
+      (let ((value (gethash key table)))
+        (when value
+          (apply function (list key value)))))))
 
 (defun rfcview:refresh-header-line ()
   (setq header-line-format
@@ -420,6 +427,7 @@ create the cache from scratch."
     (define-key map (kbd "TAB") 'forward-button)
     (define-key map (kbd "<backtab>") 'backward-button)
     (define-key map (kbd "g") 'rfcview:index-refresh-screen)
+    (define-key map (kbd "s") 'rfcview:index-toggle-sort-order)
     (define-key map (kbd "q") 'bury-buffer)
     map)
   "RFC INDEX key map.")
@@ -579,6 +587,17 @@ create the cache from scratch."
     (plist-put rfcview:rfc-cache :favorite (sort favorite '<))
     (rfcview:index-refresh-entry number)))
 
+(defun rfcview:index-toggle-sort-order ()
+  "Toggle the RFC index sort order between ascending and descending.
+Applies to the All and Favorites views only.  Recents preserves
+chronological order; Keywords preserves relevance-score order."
+  (interactive)
+  (setq rfcview:index-sort-order
+        (if (eq rfcview:index-sort-order 'ascending) 'descending 'ascending))
+  (message "RFC index sort order: %s (applies to All / Favorites)"
+           (if (eq rfcview:index-sort-order 'ascending) "ascending" "descending"))
+  (rfcview:index-refresh-screen))
+
 (defun rfcview:index-apply-filter-all ()
   (interactive)
   (setq rfcview:index-filter nil)
@@ -613,7 +632,7 @@ create the cache from scratch."
       (insert "    n / p       next / previous entry\n")
       (insert "    RET / SPC   open RFC\n")
       (insert "    #           goto RFC number\n")
-      (insert "    TAB         next button\n\n")
+      (insert "    TAB / S-TAB next / previous button\n\n")
       (insert "  Filters\n")
       (insert "    A / *       all\n")
       (insert "    F           favorites\n")
@@ -622,6 +641,9 @@ create the cache from scratch."
       (insert "    f           jump to filter line\n\n")
       (insert "  Other\n")
       (insert "    v           toggle favorite\n")
+      (insert "    s           toggle sort order (asc / desc by RFC number)\n")
+      (insert "                (applies to All / Favorites only; Recents stays\n")
+      (insert "                chronological, Keywords stays score-ranked)\n")
       (insert "    g           refresh\n")
       (insert "    q           quit\n")
       (insert "    ?           this help\n"))

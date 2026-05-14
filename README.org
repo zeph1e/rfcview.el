@@ -56,6 +56,7 @@ Place all four =.el= files (=rfcview.el=, =rfcview-core.el=, =rfcview-index.el=,
 |-----------+-------------------------------------|
 | =RET= / =SPC= | Open RFC under point            |
 | =n= / =p=     | Next / previous entry           |
+| =TAB= / =S-TAB= | Next / previous button        |
 | =v=           | Toggle favorite                 |
 | =A=           | Show all                        |
 | =F=           | Show favorites                  |
@@ -63,6 +64,7 @@ Place all four =.el= files (=rfcview.el=, =rfcview-core.el=, =rfcview-index.el=,
 | =K=           | Keyword search                  |
 | =#=           | Jump to RFC by number           |
 | =f=           | Jump to filter line             |
+| =s=           | Toggle sort order (asc / desc by RFC number; All / Favorites only) |
 | =g=           | Refresh index                   |
 | =?=           | Help                            |
 | =q=           | Bury buffer                     |
@@ -71,13 +73,15 @@ In an RFC read buffer:
 
 | Key       | Action                              |
 |-----------+-------------------------------------|
-| =]= / =[=     | Next / previous section heading |
-| =TAB= / =S-TAB= | Next / previous RFC cross-reference |
-| =n= / =p=     | Next / previous line            |
-| =+= / =-=     | Increase / decrease font size   |
-| =o=           | View raw cached file            |
-| =?=           | Help                            |
-| =q=           | Quit (refocus index if visible) |
+| =]= / =[=       | Next / previous section heading       |
+| =TAB= / =S-TAB= | Next / previous RFC cross-reference   |
+| =RET=           | Follow link under point               |
+| =n= / =p=       | Next / previous line                  |
+| =b= / =f=       | Backward / forward char               |
+| =+= / =-= / === / =0= | Increase / decrease / reset font size |
+| =o=             | View raw cached file                  |
+| =?=             | Help                                  |
+| =q=             | Quit (refocus index if visible)       |
 
 * PDF support
 

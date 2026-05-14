@@ -61,6 +61,15 @@ PDF viewing requires pdf-tools."
   :type 'boolean
   :group 'rfcview)
 
+(defcustom rfcview:index-sort-order 'descending
+  "Sort order for the RFC index, by RFC number.
+Either \\='descending (default, newest first) or \\='ascending.
+Applies to the All and Favorites views only.  Recents preserves
+chronological order; Keywords preserves relevance-score order."
+  :type '(choice (const :tag "Descending (newest first)" descending)
+                 (const :tag "Ascending (oldest first)" ascending))
+  :group 'rfcview)
+
 (defcustom rfcview:use-debug nil
   "Whether to use debug output or not."
   :type 'boolean
