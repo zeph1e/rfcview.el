@@ -174,6 +174,10 @@ PDF viewing requires pdf-tools."
   'face 'rfcview:button-face
   'mouse-face 'rfcview:mouse-face)
 
+(define-button-type 'rfcview:section-link-button
+  'face 'rfcview:button-face
+  'mouse-face 'rfcview:mouse-face)
+
 (defvar rfcview:month-name-pattern
   (eval-when-compile (regexp-opt
                       '("January" "February" "March" "April" "May" "June" "July"

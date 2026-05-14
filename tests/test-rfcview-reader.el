@@ -93,6 +93,36 @@
   "Matches multi-level appendix subsection heading with trailing dot 'A.1.3.  Title\\n\\n'."
   (should (rfcview-test:matches-heading "\nA.1.3.  Detailed Subsection\n\n")))
 
+(ert-deftest rfcview:test-section-heading-regexp-wrapped-subsection ()
+  "Matches a wrapped subsection heading like RFC 8968 §2.6 / §2.7."
+  (should (rfcview-test:matches-heading
+           "\n2.6.  Simultaneous Operation of Babel over DTLS and Unprotected Babel on\n      a Node\n\n")))
+
+(ert-deftest rfcview:test-section-heading-regexp-wrapped-subsection-deeper ()
+  "Matches a wrapped deeper subsection heading (3-segment number)."
+  (should (rfcview-test:matches-heading
+           "\n4.3.1.  Long Title That Wraps Onto A Second\n        Continuation Line\n\n")))
+
+(ert-deftest rfcview:test-section-heading-regexp-wrap-not-allowed-for-top-level ()
+  "Does not match a wrapped top-level numbered heading (would false-match list items)."
+  (should-not (rfcview-test:matches-heading
+               "\n3.  A HOST has to be prepared for various\n    failure modes here\n\n")))
+
+(ert-deftest rfcview:test-section-heading-regexp-subsection-with-commas ()
+  "Matches a subsection title that contains commas (RFC 8698 §6.2 style)."
+  (should (rfcview-test:matches-heading
+           "\n6.2.  Method for Delay, Loss, and Marking Ratio Estimation\n\n")))
+
+(ert-deftest rfcview:test-section-heading-regexp-subsection-comma-rejects-sentence ()
+  "Does not match a single-line list item that ends with a period (sentence-shape)."
+  (should-not (rfcview-test:matches-heading
+               "\n6.2.  Foo, bar, and baz.\n\n")))
+
+(ert-deftest rfcview:test-section-heading-regexp-top-level-with-comma-still-rejected ()
+  "Top-level (X.) numbered title with a comma is still rejected to block list items."
+  (should-not (rfcview-test:matches-heading
+               "\n3.  Foo, bar.\n\n")))
+
 (ert-deftest rfcview:test-section-heading-regexp-all-caps-bare-word ()
   "Matches all-caps bare-word headings like 'INTRODUCTION\\n\\n'."
   (should (rfcview-test:matches-heading "\nINTRODUCTION\n\n")))
@@ -538,6 +568,451 @@ one blank line is left visible (overlay ends before it)."
       (let ((btn (button-at (match-beginning 0))))
         (should (string-match-p "Transmission Control Protocol"
                                  (button-get btn 'help-echo)))))))
+
+;;; ─── rfcview:read-buttonize-toc ─────────────────────────────────────────────
+
+(defun rfcview-test:sample-rfc-with-toc ()
+  "Return sample RFC text containing a Table of Contents and matching sections."
+  (concat "Network Working Group                                   J. Author\n"
+          "Request for Comments: 9999                           Some Corp.\n"
+          "Category: Standards Track                           January 2024\n"
+          "\n"
+          "\n"
+          "                       A Sample Protocol\n"
+          "\n"
+          "Abstract\n"
+          "\n"
+          "   This is the abstract.\n"
+          "\n"
+          "Table of Contents\n"
+          "\n"
+          "   1.  Introduction ........................... 2\n"
+          "   1.1  Goals .................................. 2\n"
+          "   2.  Protocol Details ....................... 3\n"
+          "   Acknowledgements ........................... 5\n"
+          "\n"
+          "1.  Introduction\n"
+          "\n"
+          "   Intro paragraph.\n"
+          "\n"
+          "1.1  Goals\n"
+          "\n"
+          "   Some goals.\n"
+          "\n"
+          "2.  Protocol Details\n"
+          "\n"
+          "   Details here.\n"
+          "\n"
+          "Acknowledgements\n"
+          "\n"
+          "   Thanks!\n"))
+
+(defun rfcview-test:section-buttons ()
+  "Return an alist of (LABEL . TARGET-POS) for all section-link buttons in buffer."
+  (let (result)
+    (save-excursion
+      (goto-char (point-min))
+      (while (forward-button 1 nil nil t)
+        (let ((b (button-at (point))))
+          (when (eq (button-type b) 'rfcview:section-link-button)
+            (push (cons (button-label b)
+                        (marker-position (button-get b 'target)))
+                  result)))))
+    (nreverse result)))
+
+(ert-deftest rfcview:test-read-buttonize-toc-numeric-entries ()
+  "Numbered TOC entries get section-link buttons pointing at their heading."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let ((btns (rfcview-test:section-buttons)))
+      (should (assoc "Introduction" btns))
+      (should (assoc "Protocol Details" btns)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-multi-level-numeric ()
+  "Multi-level TOC entry (1.1) is buttonized and resolves via the by-number map."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (should (assoc "Goals" (rfcview-test:section-buttons)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-unnumbered-entry ()
+  "Unnumbered TOC entry falls back to title lookup and gets a button."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (should (assoc "Acknowledgements" (rfcview-test:section-buttons)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-button-target-is-heading-position ()
+  "Button's target marker points at the heading line, not at the TOC entry."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let* ((target (cdr (assoc "Introduction"
+                                (rfcview-test:section-buttons))))
+           (heading-pos (save-excursion
+                          (goto-char (point-min))
+                          (re-search-forward "^1\\.  Introduction$")
+                          (line-beginning-position))))
+      (should (= target heading-pos)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-pushing-button-jumps-to-section ()
+  "Activating a TOC button moves point to the section heading."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (goto-char (point-min))
+    (re-search-forward "Introduction")
+    (let ((btn (button-at (1- (point)))))
+      (should btn)
+      (push-button (button-start btn))
+      (should (looking-at "1\\.  Introduction")))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-no-toc-no-buttons ()
+  "No section-link buttons created when buffer lacks a TOC heading."
+  (with-temp-buffer
+    (insert "Abstract\n\nSome text.\n\n1.  Introduction\n\nIntro.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (should (null (rfcview-test:section-buttons)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-missing-anchor-skipped ()
+  "TOC entry whose section does not exist in body produces no button."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "   1.  Introduction ........................... 2\n"
+            "   2.  Nonexistent Section .................... 3\n"
+            "\n"
+            "1.  Introduction\n"
+            "\n"
+            "   Intro.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let ((labels (mapcar #'car (rfcview-test:section-buttons))))
+      (should (member "Introduction" labels))
+      (should-not (member "Nonexistent Section" labels)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-absorbs-wrapped-continuation ()
+  "A TOC entry that wraps to a continuation line produces one button covering both lines.
+The button's label includes the continuation text, and a `match-string'-style
+lookup on the wrapped title finds the section."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "   4.3.1.  MGM Nonce Format for Transforms Based on the\n"
+            "           \"Kuznyechik\" Cipher\n"
+            "\n"
+            "4.3.1.  MGM Nonce Format for Transforms Based on the \"Kuznyechik\" Cipher\n"
+            "\n"
+            "   Body text.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let ((labels (mapcar (lambda (e)
+                            (replace-regexp-in-string "[ \t\n]+" " " (car e)))
+                          (rfcview-test:section-buttons))))
+      (should (= 1 (length labels)))
+      (should (string-match-p "Kuznyechik" (car labels))))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-wrapped-body-heading-resolves ()
+  "A wrapped body subsection heading is detected and its TOC entry links to it."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "   2.6.  Simultaneous Operation of Babel over DTLS and Unprotected\n"
+            "         Babel on a Node\n"
+            "\n"
+            "2.6.  Simultaneous Operation of Babel over DTLS and Unprotected Babel on\n"
+            "      a Node\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let* ((btns (rfcview-test:section-buttons))
+           (heading-pos (save-excursion
+                          (goto-char (point-min))
+                          (re-search-forward "^2\\.6\\.  Simultaneous")
+                          (line-beginning-position))))
+      (should (= 1 (length btns)))
+      (should (= heading-pos (cdr (car btns)))))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-spaced-dot-leader ()
+  "TOC entries with spaced-dot leaders (`. . . . .`) are buttonized cleanly."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "   1.  Introduction  . . . . . . . . . . . . . . . . . . . . .   3\n"
+            "   2.  Definitions . . . . . . . . . . . . . . . . . . . . . .   4\n"
+            "\n"
+            "1.  Introduction\n"
+            "\n"
+            "   Body.\n"
+            "\n"
+            "2.  Definitions\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let ((labels (mapcar #'car (rfcview-test:section-buttons))))
+      (should (member "Introduction" labels))
+      (should (member "Definitions" labels)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-dims-leader-and-page ()
+  "Dot-leader and page number on a TOC line carry rfcview:read-toc-leader-face."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "   1.  Introduction  . . . . . . . . . . . . . . . . . . . . .   3\n"
+            "\n"
+            "1.  Introduction\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (goto-char (point-min))
+    (re-search-forward "Introduction")
+    (let* ((title-end (point))
+           (eol (line-end-position)))
+      ;; Title text itself has no leader face.
+      (should-not (eq 'rfcview:read-toc-leader-face
+                      (get-text-property (1- title-end) 'face)))
+      ;; The dot leader and trailing page do.
+      (should (eq 'rfcview:read-toc-leader-face
+                  (get-text-property (1+ title-end) 'face)))
+      (should (eq 'rfcview:read-toc-leader-face
+                  (get-text-property (1- eol) 'face))))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-no-leader-no-dimming ()
+  "TOC entry without a leader/page (RFC 9227 style) gets no leader face."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "   1.  Introduction\n"
+            "\n"
+            "1.  Introduction\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (goto-char (point-min))
+    (re-search-forward "Introduction")
+    ;; Past the title there is nothing on the line; no face to inspect,
+    ;; and crucially the title char itself has no leader face.
+    (should-not (eq 'rfcview:read-toc-leader-face
+                    (get-text-property (1- (point)) 'face)))))
+
+;; --- Tests derived from validation against ~/.emacs.d/.RFC cache ---
+
+(ert-deftest rfcview:test-read-buttonize-toc-title-with-rfc-reference ()
+  "TOC entry whose title legitimately contains \"RFC NNNN\" still produces a
+section-link button covering the full title (validator false-positive case;
+RFC 9720 style \"Changes to RFC 7990\")."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "   2.  Changes to RFC 7990\n"
+            "\n"
+            "1.  Introduction\n"
+            "\n"
+            "   Body.\n"
+            "\n"
+            "2.  Changes to RFC 7990\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let ((btns (rfcview-test:section-buttons)))
+      (should (assoc "Changes to RFC 7990" btns)))))
+
+(ert-deftest rfcview:test-read-toc-button-wins-over-rfc-ref-in-title ()
+  "When a TOC entry's title contains \"RFC NNNN\", the section-link covering
+the full title wins; `rfcview:read-buttonize-refs' skips the already-buttoned
+range so clicking on the digits jumps to the section, not the cross-RFC."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "   2.  Changes to RFC 7990\n"
+            "\n"
+            "1.  Introduction\n"
+            "\n"
+            "   Body.\n"
+            "\n"
+            "2.  Changes to RFC 7990\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (rfcview:read-buttonize-refs)
+    (goto-char (point-min))
+    (re-search-forward "Table of Contents")
+    (re-search-forward "RFC 7990")
+    (backward-char 2)
+    (let ((b (button-at (point))))
+      (should b)
+      (should (eq (button-type b) 'rfcview:section-link-button)))))
+
+(ert-deftest rfcview:test-read-buttonize-refs-still-runs-outside-toc ()
+  "Complement to the TOC-precedence fix: `RFC NNNN' references in body text
+(not inside a TOC entry's section-link) still get an `rfc-link-button'."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "   1.  Introduction\n"
+            "\n"
+            "1.  Introduction\n"
+            "\n"
+            "   See RFC 7990 for details.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (rfcview:read-buttonize-refs)
+    (goto-char (point-min))
+    (re-search-forward "See RFC 7990")
+    (backward-char 4)
+    (let ((b (button-at (point))))
+      (should b)
+      (should (eq (button-type b) 'rfcview:rfc-link-button)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-short-single-word-continuation ()
+  "A wrapped TOC entry whose continuation line is a single trailing word
+(RFC 9350 §18.3.1 \"Registry\" style) is absorbed into one button."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "       18.3.1.  IS-IS Sub-TLVs for IS-IS Router CAPABILITY TLV\n"
+            "                Registry\n"
+            "\n"
+            "18.3.1.  IS-IS Sub-TLVs for IS-IS Router CAPABILITY TLV Registry\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let ((btns (rfcview-test:section-buttons)))
+      (should (= 1 (length btns)))
+      (should (string-match-p "Registry" (car (car btns)))))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-deeply-nested-numeric ()
+  "TOC entry with a three-segment section number (18.4.5) resolves correctly."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "       18.4.5.  Opaque LSA Option Types Registry\n"
+            "\n"
+            "18.4.5.  Opaque LSA Option Types Registry\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (should (assoc "Opaque LSA Option Types Registry"
+                   (rfcview-test:section-buttons)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-pre-toc-era-rfc-no-buttons ()
+  "Negative: a pre-1980-style RFC without any \"Table of Contents\" heading
+creates zero section-link buttons (validator confirmed for RFCs 15–729)."
+  (with-temp-buffer
+    (insert "Network Working Group                              S. Crocker\n"
+            "Request for Comments: 42                            April 1970\n"
+            "\n"
+            "                       Some Old Memo\n"
+            "\n"
+            "INTRODUCTION\n"
+            "\n"
+            "   Some text here.\n"
+            "\n"
+            "DISCUSSION\n"
+            "\n"
+            "   More text.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (should (null (rfcview-test:section-buttons)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-page-break-text-not-buttonized ()
+  "Negative: page-break artifacts (footer, page header) that fall inside the
+TOC region are not turned into section-link buttons.  Mirrors what the
+validator's \"non-blank lines in TOC region\" count includes but the walker
+correctly skips."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "   1.  Introduction\n"
+            "\n\n\n\n\n\n\n\n\n\n\n\n\n"
+            "Author, et al.            Informational              [Page 1]\n"
+            "\f\n"
+            "RFC 9999                  Foo Protocol            January 2024\n"
+            "\n\n\n"
+            "   2.  Discussion\n"
+            "\n"
+            "1.  Introduction\n"
+            "\n"
+            "   Body.\n"
+            "\n"
+            "2.  Discussion\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-hide-page-breaks)
+    (rfcview:read-buttonize-toc)
+    (let ((labels (mapcar #'car (rfcview-test:section-buttons))))
+      (should (member "Introduction" labels))
+      (should (member "Discussion" labels))
+      (should-not (cl-some (lambda (l)
+                             (or (string-match-p "Page" l)
+                                 (string-match-p "Foo Protocol" l)
+                                 (string-match-p "Author" l)))
+                           labels)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-running-header-not-buttonized ()
+  "Negative: a TOC region containing a running RFC header line like
+\"RFC 9999  Protocol  January 2024\" does not produce a button for it."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "   1.  Introduction\n"
+            "RFC 9999                  Foo Protocol            January 2024\n"
+            "   2.  Conclusion\n"
+            "\n"
+            "1.  Introduction\n"
+            "\n"
+            "   Body.\n"
+            "\n"
+            "2.  Conclusion\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let ((labels (mapcar #'car (rfcview-test:section-buttons))))
+      (should-not (cl-some (lambda (l) (string-match-p "Foo Protocol" l))
+                           labels)))))
+
+(ert-deftest rfcview:test-section-heading-regexp-rejects-prose-paragraph ()
+  "Negative: a prose paragraph that happens to be one line and starts with a
+capital letter does not match the section heading regexp."
+  (should-not (rfcview-test:matches-heading
+               "\nThe protocol is designed to be extensible.\n\n")))
+
+(ert-deftest rfcview:test-section-heading-regexp-matches-quoted-title ()
+  "Section title that starts with a double-quote — '4.3.1.  \"Kuznyechik\" Foo' —
+matches via the `[A-Z(\"]' title-start class."
+  (should (rfcview-test:matches-heading
+           "\n4.3.1.  \"Kuznyechik\" Cipher Format\n\n")))
+
+(ert-deftest rfcview:test-read-buttonize-toc-handles-all-caps-toc-heading ()
+  "TOC line in ALL CAPS (RFC 791 era) is recognized as the TOC heading."
+  (with-temp-buffer
+    (insert "                            TABLE OF CONTENTS\n"
+            "\n"
+            "  1.  INTRODUCTION ..........................................    1\n"
+            "\n"
+            "1.  INTRODUCTION\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (should (assoc "INTRODUCTION" (rfcview-test:section-buttons)))))
 
 ;;; ─── rfcview:read-next-section / rfcview:read-prev-section ──────────────────
 

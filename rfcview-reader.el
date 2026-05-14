@@ -15,6 +15,15 @@
 (defvar-local rfcview:read-rfc-number 0
   "Number of RFC currently reading.")
 
+(defvar-local rfcview:read-section-anchors-by-number nil
+  "Hash mapping section-number keys to heading position markers.
+Keys look like \"3.1\" or \"A\".  Populated by `rfcview:read-fontify'
+and consumed by `rfcview:read-buttonize-toc'.")
+
+(defvar-local rfcview:read-section-anchors-by-title nil
+  "Hash mapping normalized heading-title strings to heading position markers.
+Fallback lookup for TOC entries without a section number.")
+
 (defface rfcview:read-rfc-header-face
   '((((class color) (min-colors 88) (background dark))
      (:foreground "dim grey"))
@@ -38,6 +47,11 @@
   "Face for section headings in RFC read mode."
   :group 'rfcview)
 
+(defface rfcview:read-toc-leader-face
+  '((t (:inherit shadow)))
+  "Face for the dot-leader and trailing page number in TOC entries."
+  :group 'rfcview)
+
 (defconst rfcview:section-heading-regexp
   (concat
    ;; Numeric headings require a trailing blank line (\n\n) to reject multi-line
@@ -56,6 +70,16 @@
    "\\|[A-Z]\\(?:\\.[0-9]\\{1,2\\}\\)+\\.?[ \t]+"
    "\\)"
    "[A-Z(\"][^,\n]*\n\n"
+   ;; Subsection titles (X.Y+ only) with commas in the title — e.g.
+   ;; RFC 8698 §6.2 "Method for Delay, Loss, and Marking Ratio Estimation".
+   ;; The in-group-1 numeric alt rejects commas to block multi-line list
+   ;; items ("3.  A HOST has to be prepared, …").  Multi-segment numbers
+   ;; aren't used in RFC list items, and requiring a non-period last char
+   ;; rules out the residual "X.Y  Sentence, with, commas." shape.
+   "\\|^\n[0-9]+\\(?:\\.[0-9]+\\)+\\.?[ \t]+[A-Z(\"][^\n]*[^.\n]\n\n"
+   ;; Wrapped subsection title (X.Y form only, e.g. RFC 8968 §2.6):
+   ;; "2.6.  Long title that overflows\n      onto a second line\n\n"
+   "\\|^\n[0-9]+\\(?:\\.[0-9]+\\)+\\.?[ \t]+[A-Z(\"][^\n]*\n[ \t]\\{5,\\}[a-zA-Z\"][^\n]*\n\n"
    ;; Appendix headings are unambiguous so only the first line is matched;
    ;; this handles titles that wrap to a second indented continuation line.
    ;; Appendix (modern): "Appendix A.  Title (possibly wrapped)"
@@ -76,7 +100,11 @@
    "\\|^\nAbstract[^\n]*\n\n"
    ;; Dash-underline style (RFC 768 era): "Introduction\n------------\n"
    "\\|^\n[ ]*[A-Z][a-zA-Z0-9. ]+\n[ ]*-\\{3,\\}\n\n")
-  "Regexp matching RFC section headings across all eras, preceded by a blank line.")
+  "Regexp matching RFC section headings across all eras, preceded by a blank line.
+Subsection titles (`X.Y' form and deeper) may contain commas (RFC 8698 §6.2)
+and may wrap onto an indented continuation line (RFC 8968 §2.6).  Top-level
+numbered titles (`X.') keep the strict one-line, no-comma rule, since multi-line
+or comma-bearing list items often begin with a single-segment number.")
 
 (defconst rfcview:open-rfc-functions '((txt . rfcview:open-rfc-txt)
                                        (pdf . rfcview:open-rfc-pdf)))
@@ -139,14 +167,67 @@
       (goto-char orig)
       (message "No previous section"))))
 
+(defun rfcview:read--normalize-number (s)
+  "Strip leading whitespace and trailing whitespace/dots/dashes from S."
+  (replace-regexp-in-string "\\`[ \t]+\\|[ \t.\\-]+\\'" "" s))
+
+(defun rfcview:read--normalize-title (s)
+  "Lowercase S, trim it, and collapse internal whitespace runs."
+  (downcase (replace-regexp-in-string "[ \t]+" " " (string-trim s))))
+
+(defun rfcview:read--register-anchor (pos heading-line num-prefix)
+  "Record a heading at POS in the anchor tables.
+HEADING-LINE is the literal heading text without surrounding newlines.
+NUM-PREFIX is group 1 of `rfcview:section-heading-regexp', or nil when the
+heading matched via an alternative outside group 1 (modern Appendix lines,
+ALL-CAPS, Abstract, etc.)."
+  (let ((marker (copy-marker pos)))
+    (cond
+     (num-prefix
+      (let ((title (string-trim (substring heading-line (length num-prefix)))))
+        (puthash (rfcview:read--normalize-number num-prefix)
+                 marker rfcview:read-section-anchors-by-number)
+        (when (> (length title) 0)
+          (puthash (rfcview:read--normalize-title title)
+                   marker rfcview:read-section-anchors-by-title))))
+     ((string-match "\\`Appendix \\([A-Z]\\)\\.?[ \t]+\\(.*\\)" heading-line)
+      (puthash (match-string 1 heading-line)
+               marker rfcview:read-section-anchors-by-number)
+      (puthash (rfcview:read--normalize-title (match-string 2 heading-line))
+               marker rfcview:read-section-anchors-by-title))
+     ((string-match "\\`APPENDIX \\([A-Z]\\|[IVX]+\\)[: \t-]+\\(.*\\)" heading-line)
+      (puthash (match-string 1 heading-line)
+               marker rfcview:read-section-anchors-by-number)
+      (puthash (rfcview:read--normalize-title (match-string 2 heading-line))
+               marker rfcview:read-section-anchors-by-title))
+     ;; Wrapped subsection ("2.6.  Long Title...") — only line 1 is in heading-line.
+     ((string-match "\\`\\([0-9]+\\(?:\\.[0-9]+\\)+\\)\\.?[ \t]+\\(.*\\)" heading-line)
+      (puthash (match-string 1 heading-line)
+               marker rfcview:read-section-anchors-by-number)
+      (puthash (rfcview:read--normalize-title (match-string 2 heading-line))
+               marker rfcview:read-section-anchors-by-title))
+     ((string-match "\\`\\([A-Z]\\.[0-9]+\\(?:\\.[0-9]+\\)?\\)\\.?[ \t]+\\(.*\\)"
+                    heading-line)
+      (puthash (match-string 1 heading-line)
+               marker rfcview:read-section-anchors-by-number)
+      (puthash (rfcview:read--normalize-title (match-string 2 heading-line))
+               marker rfcview:read-section-anchors-by-title))
+     (t
+      (puthash (rfcview:read--normalize-title heading-line)
+               marker rfcview:read-section-anchors-by-title)))))
+
 (defun rfcview:read-fontify ()
-  "Apply faces to RFC header, title, and section headings via text properties."
+  "Apply faces to RFC header, title, and section headings via text properties.
+Also populates `rfcview:read-section-anchors-by-number' and -by-title with
+markers pointing at each heading, used later by `rfcview:read-buttonize-toc'."
+  (setq rfcview:read-section-anchors-by-number (make-hash-table :test 'equal)
+        rfcview:read-section-anchors-by-title  (make-hash-table :test 'equal))
   (with-silent-modifications
     (save-excursion
       ;; Header block: from start to the first blank line
       (goto-char (point-min))
       ;; recent has \ufeff at the very early of document
-      (let ((header-start (if (re-search-forward "^[^\ufeff\n]+$" nil t) 
+      (let ((header-start (if (re-search-forward "^[^\ufeff\n]+$" nil t)
                               (line-beginning-position)
                             (point-min)))
             (header-end (if (re-search-forward "^[ \t]*$" nil t)
@@ -170,8 +251,11 @@
         (let* ((line-start (1+ (match-beginning 0)))
                (line-end (save-excursion
                            (goto-char line-start)
-                           (line-end-position))))
+                           (line-end-position)))
+               (heading-line (buffer-substring-no-properties line-start line-end))
+               (num-prefix (and (match-beginning 1) (match-string 1))))
           (put-text-property line-start line-end 'face 'rfcview:read-rfc-section-face)
+          (rfcview:read--register-anchor line-start heading-line num-prefix)
           ;; Back up one char when the match consumed a trailing blank line so
           ;; it remains available as the leading blank for the next heading match.
           (when (and (>= (point) 2)
@@ -225,22 +309,153 @@ line from the top margin is left visible so navigation works correctly."
 
 
 (defun rfcview:read-buttonize-refs ()
-  "Make RFC XXXX and [RFCXXXX] cross-references in the buffer clickable."
+  "Make RFC XXXX and [RFCXXXX] cross-references in the buffer clickable.
+Skips matches that already lie inside a button — e.g. an `RFC NNNN'
+fragment inside a TOC entry's title that `rfcview:read-buttonize-toc'
+has already wrapped in a `rfcview:section-link-button'."
   (save-excursion
     (goto-char (point-min))
     (while (re-search-forward
             "\\(?:\\[RFC\\([0-9]+\\)\\]\\|\\bRFC[[:space:]]+\\([0-9]+\\)\\)"
             nil t)
-      (let* ((num (string-to-number (or (match-string 1) (match-string 2))))
-             (rfc (and rfcview:rfc-cache
-                       (hash-table-p (plist-get rfcview:rfc-cache :table))
-                       (gethash num (plist-get rfcview:rfc-cache :table)))))
-        (make-button (match-beginning 0) (match-end 0)
-                     'type 'rfcview:rfc-link-button
-                     'number num
-                     'action (lambda (btn)
-                               (rfcview:read-rfc (button-get btn 'number)))
-                     'help-echo (when rfc (plist-get rfc :title)))))))
+      (unless (button-at (match-beginning 0))
+        (let* ((num (string-to-number (or (match-string 1) (match-string 2))))
+               (rfc (and rfcview:rfc-cache
+                         (hash-table-p (plist-get rfcview:rfc-cache :table))
+                         (gethash num (plist-get rfcview:rfc-cache :table)))))
+          (make-button (match-beginning 0) (match-end 0)
+                       'type 'rfcview:rfc-link-button
+                       'number num
+                       'action (lambda (btn)
+                                 (rfcview:read-rfc (button-get btn 'number)))
+                       'help-echo (when rfc (plist-get rfc :title))))))))
+
+(defun rfcview:read--make-section-button (beg end target)
+  "Wrap [BEG, END) in a section-link button that jumps to marker TARGET."
+  (make-button beg end
+               'type 'rfcview:section-link-button
+               'target target
+               'action (lambda (btn)
+                         (let ((m (button-get btn 'target)))
+                           (when (markerp m)
+                             (goto-char m)
+                             (when (eq (window-buffer) (current-buffer))
+                               (recenter 0)))))
+               'help-echo "Jump to section"))
+
+(defun rfcview:read--dim-toc-tail (title-end-on-line-1)
+  "Dim everything past TITLE-END-ON-LINE-1 to end of line.
+Applies `rfcview:read-toc-leader-face' to any dot leader, trailing page
+number, and intervening whitespace.  No-op when the title already ends
+at end-of-line (TOCs without leaders, like RFC 9227)."
+  (let ((eol (save-excursion (goto-char title-end-on-line-1)
+                             (line-end-position))))
+    (when (> eol title-end-on-line-1)
+      (put-text-property title-end-on-line-1 eol
+                         'face 'rfcview:read-toc-leader-face))))
+
+(defun rfcview:read--absorb-toc-continuations (title-beg title-end limit)
+  "Extend a TOC title that wraps onto continuation lines.
+TITLE-BEG and TITLE-END bracket the title text already matched on the
+current line; point must be on that line.  LIMIT bounds the search.
+Returns a cons (NEW-TITLE-END . LINES-CONSUMED).  A line counts as a
+continuation if it is non-blank, indented to or past TITLE-BEG's column,
+and does not start with a section number or \"Appendix\"."
+  (let ((title-col (save-excursion (goto-char title-beg) (current-column)))
+        (te title-end)
+        (extra 0))
+    (save-excursion
+      (forward-line 1)
+      (while (and (< (point) limit)
+                  (looking-at "^[ \t]+[^ \t\n]")
+                  (not (looking-at "^[ \t]*[0-9]"))
+                  (not (looking-at "^[ \t]*Appendix[ \t]"))
+                  (let ((c (save-excursion (skip-chars-forward " \t")
+                                           (current-column))))
+                    (>= c title-col)))
+        (setq te (line-end-position))
+        (setq extra (1+ extra))
+        (forward-line 1)))
+    (cons te extra)))
+
+(defun rfcview:read-buttonize-toc ()
+  "Make Table of Contents entries clickable buttons that jump to their section.
+Looks up each TOC entry in the anchor tables built by `rfcview:read-fontify':
+numbered entries match `rfcview:read-section-anchors-by-number', unnumbered
+entries fall back to `-by-title'. Lines with no matching anchor are left as
+plain text. Does nothing if the buffer has no \"Table of Contents\" heading
+or if the anchor tables are empty."
+  (when (and (hash-table-p rfcview:read-section-anchors-by-number)
+             (hash-table-p rfcview:read-section-anchors-by-title)
+             (> (+ (hash-table-count rfcview:read-section-anchors-by-number)
+                   (hash-table-count rfcview:read-section-anchors-by-title))
+                0))
+    (save-excursion
+      (goto-char (point-min))
+      (let ((case-fold-search t))
+        (when (re-search-forward
+               "^[ \t]*\\(?:[0-9]+\\.[ \t]+\\)?Table of Contents[ \t]*$" nil t)
+          (forward-line 1)
+          (let ((toc-end (save-excursion
+                           (if (re-search-forward
+                                rfcview:section-heading-regexp nil t)
+                               (match-beginning 0)
+                             (point-max)))))
+            (with-silent-modifications
+              (while (< (point) toc-end)
+                (let ((extra 0))
+                  (cond
+                   ;; Numbered: "   1.2.  Title ............. 7" (title may wrap)
+                   ((looking-at
+                     "^[ \t]*\\([0-9]+\\(?:\\.[0-9]+\\)*\\)\\.?[ \t]+\\(.+?\\)\\(?:[ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)?[ \t]*$")
+                    (let* ((num (match-string-no-properties 1))
+                           (tb (match-beginning 2))
+                           (line1-te (match-end 2))
+                           (target (gethash num rfcview:read-section-anchors-by-number))
+                           (cont (rfcview:read--absorb-toc-continuations tb line1-te toc-end))
+                           (te (car cont)))
+                      (setq extra (cdr cont))
+                      (when target
+                        (rfcview:read--make-section-button tb te target))
+                      (rfcview:read--dim-toc-tail line1-te)))
+                   ;; Appendix subsection: "   A.1  Foo ........... 30"
+                   ((looking-at
+                     "^[ \t]*\\([A-Z]\\.[0-9]+\\(?:\\.[0-9]+\\)?\\)\\.?[ \t]+\\(.+?\\)\\(?:[ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)?[ \t]*$")
+                    (let* ((num (match-string-no-properties 1))
+                           (tb (match-beginning 2))
+                           (line1-te (match-end 2))
+                           (target (gethash num rfcview:read-section-anchors-by-number))
+                           (cont (rfcview:read--absorb-toc-continuations tb line1-te toc-end))
+                           (te (car cont)))
+                      (setq extra (cdr cont))
+                      (when target
+                        (rfcview:read--make-section-button tb te target))
+                      (rfcview:read--dim-toc-tail line1-te)))
+                   ;; Appendix: "   Appendix A.  Title ......... 30"
+                   ((looking-at
+                     "^[ \t]*Appendix[ \t]+\\([A-Z]\\)\\.?[ \t]+\\(.+?\\)\\(?:[ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)?[ \t]*$")
+                    (let* ((letter (match-string-no-properties 1))
+                           (tb (match-beginning 2))
+                           (line1-te (match-end 2))
+                           (target (gethash letter rfcview:read-section-anchors-by-number))
+                           (cont (rfcview:read--absorb-toc-continuations tb line1-te toc-end))
+                           (te (car cont)))
+                      (setq extra (cdr cont))
+                      (when target
+                        (rfcview:read--make-section-button tb te target))
+                      (rfcview:read--dim-toc-tail line1-te)))
+                   ;; Unnumbered: "   Acknowledgements ........... 25"
+                   ((looking-at
+                     "^[ \t]*\\([A-Z][^\n]*?\\)\\(?:[ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)?[ \t]*$")
+                    (let* ((title (match-string-no-properties 1))
+                           (tb (match-beginning 1))
+                           (te (match-end 1))
+                           (target (gethash (rfcview:read--normalize-title title)
+                                            rfcview:read-section-anchors-by-title)))
+                      (when target
+                        (rfcview:read--make-section-button tb te target))
+                      (rfcview:read--dim-toc-tail te))))
+                  (forward-line (1+ extra)))))))))))
 
 (defun rfcview:read-trim-leading-blanks ()
   "Hide blank lines at the very beginning of the RFC buffer."
@@ -300,6 +515,9 @@ line from the top margin is left visible so navigation works correctly."
   (rfcview:read-fontify)
   (rfcview:read-trim-leading-blanks)
   (rfcview:read-hide-page-breaks)
+  ;; TOC must run before refs so a TOC entry's section-link covers any
+  ;; "RFC NNNN" fragment in the title; refs then skips already-buttoned ranges.
+  (rfcview:read-buttonize-toc)
   (rfcview:read-buttonize-refs)
   (goto-address-mode 1)
   (run-hooks 'rfcview-read-mode-hook))
