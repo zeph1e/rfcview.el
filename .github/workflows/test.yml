@@ -25,7 +25,13 @@ jobs:
       - name: Run tests
         id: run-tests
         continue-on-error: true
-        run: bash run-tests.sh 2>&1 | tee /tmp/test-output.txt
+        shell: bash
+        run: |
+          set +e
+          bash run-tests.sh > /tmp/test-output.txt 2>&1
+          rc=$?
+          cat /tmp/test-output.txt
+          exit $rc
 
       - name: Extract failed tests
         if: steps.run-tests.outcome == 'failure'
