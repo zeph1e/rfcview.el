@@ -21,6 +21,30 @@ Load interactively for testing (all four files must be on the load path):
 
 Entry point: `M-x rfcview` opens `*RFC INDEX*`. Toggle `rfcview:use-debug` to `t` to enable debug messages via `rfcview:debug`.
 
+### Testing
+
+Run the full suite (byte-compile + all ERT tests) the same way CI does:
+```
+bash run-tests.sh
+```
+
+Run the tests only, without re-byte-compiling:
+```
+emacs -Q --batch -L . -l tests/run-tests.el
+```
+
+Run a single test (or a regex-matched subset):
+```
+emacs -Q --batch -L . -L tests \
+  -l tests/test-rfcview-reader.el \
+  --eval "(ert-run-tests-batch-and-exit \"rfcview:test-parse-index-entry-title\")"
+```
+Tests are named `rfcview:test-…`. `tests/run-tests.el` uses `ert-run-tests-batch` (not `…-and-exit`) and computes its own exit code — Emacs 29.x has a bug where `ert-run-tests-batch-and-exit` returns 0 even on failure (the condition uses `or` instead of `and`). Preserve this if touching the runner; CI relies on a reliable exit code to file issues / PR comments.
+
+### CI
+
+`.github/workflows/test.yml` runs `run-tests.sh` on push and PR. On failure it: parses `FAILED` lines from the output, posts (or updates, by `<!-- rfcview-ci-failure -->` marker) a PR comment for PRs, and opens a labeled `bug` issue for pushes to `master`/`main`.
+
 ## Architecture
 
 The package is split across four files with a strict one-way dependency chain:
