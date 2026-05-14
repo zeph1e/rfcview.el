@@ -80,15 +80,16 @@ Fallback lookup for TOC entries without a section number.")
    ;; Wrapped subsection title (X.Y form only, e.g. RFC 8968 §2.6):
    ;; "2.6.  Long title that overflows\n      onto a second line\n\n"
    "\\|^\n[0-9]+\\(?:\\.[0-9]+\\)+\\.?[ \t]+[A-Z(\"][^\n]*\n[ \t]\\{5,\\}[a-zA-Z\"][^\n]*\n\n"
-   ;; Appendix headings are unambiguous so only the first line is matched;
-   ;; this handles titles that wrap to a second indented continuation line.
-   ;; Appendix (modern): "Appendix A.  Title (possibly wrapped)"
-   "\\|^\nAppendix [A-Z]\\.[ \t]+[A-Z][^\n]*\n\n"
+   ;; Appendix headings are unambiguous so both single-line and one-continuation-
+   ;; line titles are matched.
+   ;; Appendix (modern): "Appendix A.  Title" or wrapped onto a second indented line
+   "\\|^\nAppendix [A-Z]\\.[ \t]+[A-Z][^\n]*\\(?:\n[ \t]\\{5,\\}[^\n]+\\)?\n\n"
    ;; Appendix (RFC 791 era, all-caps colon): "APPENDIX A:  Title"
    "\\|^\nAPPENDIX [A-Z]:[ \t]+[A-Z][^\n]*\n\n"
    "\\|^\nAPPENDIX [IVX]+[ \t]+-[ \t]+[A-Z][^\n]*\n\n"
-   ;; Appendix subsection: "A.1.  Title" / "B.10 Title"  (1-2 digit number to avoid X.509 false hits)
-   "\\|^\n[A-Z]\\.[0-9]\\{1,2\\}\\.?[ \t]+[A-Z][^\n]*\n\n"
+   ;; Appendix subsection: "A.1.  Title" / "B.10 Title" (1-2 digit number to avoid X.509
+   ;; false hits), also handles a title that wraps onto one indented continuation line.
+   "\\|^\n[A-Z]\\.[0-9]\\{1,2\\}\\.?[ \t]+[A-Z][^\n]*\\(?:\n[ \t]\\{5,\\}[^\n]+\\)?\n\n"
    ;; ALL-CAPS bare-word headings (RFC 854/959/1122 era):
    ;; "INTRODUCTION" / "GENERAL CONSIDERATIONS" / "LINK LAYER REFERENCES"
    "\\|^\n[A-Z][-A-Z() ]\\{,50\\}[A-Z]\n\n"

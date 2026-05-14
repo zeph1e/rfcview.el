@@ -93,6 +93,16 @@
   "Matches multi-level appendix subsection heading with trailing dot 'A.1.3.  Title\\n\\n'."
   (should (rfcview-test:matches-heading "\nA.1.3.  Detailed Subsection\n\n")))
 
+(ert-deftest rfcview:test-section-heading-regexp-appendix-modern-wrapped ()
+  "Matches Appendix heading whose title wraps to a second indented line (RFC 9950 §A)."
+  (should (rfcview-test:matches-heading
+           "\nAppendix A.  Example TACACS+ Authentication Configuration with Shared\n             Secret\n\n")))
+
+(ert-deftest rfcview:test-section-heading-regexp-appendix-subsection-wrapped ()
+  "Matches appendix subsection heading whose title wraps to a continuation line (RFC 9950 §B.1)."
+  (should (rfcview-test:matches-heading
+           "\nB.1.  Example TACACS+ Authentication Configuration with Explicit\n      Certificate Definitions\n\n")))
+
 (ert-deftest rfcview:test-section-heading-regexp-wrapped-subsection ()
   "Matches a wrapped subsection heading like RFC 8968 §2.6 / §2.7."
   (should (rfcview-test:matches-heading
@@ -740,6 +750,49 @@ lookup on the wrapped title finds the section."
                           (line-beginning-position))))
       (should (= 1 (length btns)))
       (should (= heading-pos (cdr (car btns)))))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-appendix-wrapped-heading ()
+  "Appendix and appendix-subsection headings that wrap to a second line are
+detected and their (also wrapped) TOC entries are buttonized (RFC 9950 §A/B.1/B.2)."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "   Appendix A.  Example Configuration with\n"
+            "           Shared Secret\n"
+            "   Appendix B.  TLS Examples\n"
+            "     B.1.  Example Configuration with Explicit\n"
+            "           Certificate Definitions\n"
+            "\n"
+            "Appendix A.  Example Configuration with\n"
+            "             Shared Secret\n"
+            "\n"
+            "   Body A.\n"
+            "\n"
+            "Appendix B.  TLS Examples\n"
+            "\n"
+            "   Body B.\n"
+            "\n"
+            "B.1.  Example Configuration with Explicit\n"
+            "      Certificate Definitions\n"
+            "\n"
+            "   Body B.1.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let* ((btns (rfcview-test:section-buttons))
+           (targets (mapcar #'cdr btns))
+           (heading-a-pos (save-excursion (goto-char (point-min))
+                                          (re-search-forward "^Appendix A\\.")
+                                          (line-beginning-position)))
+           (heading-b-pos (save-excursion (goto-char (point-min))
+                                          (re-search-forward "^Appendix B\\.")
+                                          (line-beginning-position)))
+           (heading-b1-pos (save-excursion (goto-char (point-min))
+                                           (re-search-forward "^B\\.1\\.")
+                                           (line-beginning-position))))
+      (should (= 3 (length btns)))
+      (should (member heading-a-pos targets))
+      (should (member heading-b-pos targets))
+      (should (member heading-b1-pos targets)))))
 
 (ert-deftest rfcview:test-read-buttonize-toc-spaced-dot-leader ()
   "TOC entries with spaced-dot leaders (`. . . . .`) are buttonized cleanly."
