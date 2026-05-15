@@ -162,13 +162,101 @@
       (should (equal rfcview:rfc-cache rfcview:rfc-cache-default)))))
 
 (ert-deftest rfcview:test-load-cache-uses-file-contents-when-available ()
-  "Sets rfcview:rfc-cache to the value read from the cache file."
-  (let ((expected '(:last-modified (12345 0) :table nil :favorite (3) :recent nil))
-        rfcview:rfc-cache)
+  "Sets rfcview:rfc-cache to the value read from the cache file
+when its :version matches `rfcview:rfc-cache-version'."
+  (let* ((expected `(:version ,rfcview:rfc-cache-version
+                     :last-modified (12345 0)
+                     :table nil :favorite (3) :recent nil))
+         rfcview:rfc-cache)
     (cl-letf (((symbol-function 'rfcview:load-cache-internal)
                (lambda (_) expected)))
       (rfcview:load-cache)
       (should (equal rfcview:rfc-cache expected)))))
+
+(ert-deftest rfcview:test-rfc-cache-default-carries-current-version ()
+  "The default cache must advertise the current schema version so a
+fresh cache survives a reload without triggering migration."
+  (should (equal (plist-get rfcview:rfc-cache-default :version)
+                 rfcview:rfc-cache-version)))
+
+(ert-deftest rfcview:test-load-cache-migrates-stale-version ()
+  "A cache file whose :version differs from
+`rfcview:rfc-cache-version' is run through `rfcview:update-cache':
+favorites and recents survive, the table and last-modified are
+reset so the next index refresh rebuilds them."
+  (let* ((stale `(:version ,(1- rfcview:rfc-cache-version)
+                  :last-modified (12345 0)
+                  :table         ,(make-hash-table)
+                  :favorite      (3 7 42)
+                  :recent        (5 7)))
+         rfcview:rfc-cache)
+    (cl-letf (((symbol-function 'rfcview:load-cache-internal)
+               (lambda (_) stale)))
+      (rfcview:load-cache)
+      (should (equal (plist-get rfcview:rfc-cache :version)
+                     rfcview:rfc-cache-version))
+      (should (equal (plist-get rfcview:rfc-cache :favorite) '(3 7 42)))
+      (should (equal (plist-get rfcview:rfc-cache :recent)   '(5 7)))
+      (should (equal (plist-get rfcview:rfc-cache :last-modified)
+                     (plist-get rfcview:rfc-cache-default :last-modified)))
+      (should (null (plist-get rfcview:rfc-cache :table))))))
+
+(ert-deftest rfcview:test-load-cache-migrates-pre-versioning-cache ()
+  "An on-disk cache from before versioning (no :version key) is
+treated as stale and run through `rfcview:update-cache'.  Covers
+the upgrade path for users with an existing cache on disk."
+  (let ((legacy '(:last-modified (12345 0)
+                  :table         nil
+                  :favorite      (1 2)
+                  :recent        (9)))
+        rfcview:rfc-cache)
+    (cl-letf (((symbol-function 'rfcview:load-cache-internal)
+               (lambda (_) legacy)))
+      (rfcview:load-cache)
+      (should (equal (plist-get rfcview:rfc-cache :version)
+                     rfcview:rfc-cache-version))
+      (should (equal (plist-get rfcview:rfc-cache :favorite) '(1 2)))
+      (should (equal (plist-get rfcview:rfc-cache :recent)   '(9))))))
+
+;;; rfcview:update-cache
+
+(ert-deftest rfcview:test-update-cache-preserves-favorite-and-recent ()
+  "Direct test on the migration function: favorites and recents in
+`rfcview:rfc-cache' are carried forward verbatim."
+  (let ((rfcview:rfc-cache '(:version  0
+                             :table    (some old shape)
+                             :favorite (10 20 30)
+                             :recent   (40 50))))
+    (rfcview:update-cache 0)
+    (should (equal (plist-get rfcview:rfc-cache :favorite) '(10 20 30)))
+    (should (equal (plist-get rfcview:rfc-cache :recent)   '(40 50)))))
+
+(ert-deftest rfcview:test-update-cache-resets-non-preserved-slots ()
+  "Non-preserved slots (`:table' and other ad-hoc keys) must be
+dropped so the next index refresh rebuilds from scratch."
+  (let ((rfcview:rfc-cache `(:version       0
+                             :last-modified (99999 0)
+                             :table         ,(make-hash-table)
+                             :favorite      (1)
+                             :recent        (2)
+                             :legacy-key    "junk")))
+    (rfcview:update-cache 0)
+    (should (null (plist-get rfcview:rfc-cache :table)))
+    (should (null (plist-get rfcview:rfc-cache :legacy-key)))
+    (should (equal (plist-get rfcview:rfc-cache :last-modified)
+                   (plist-get rfcview:rfc-cache-default :last-modified)))
+    (should (equal (plist-get rfcview:rfc-cache :version)
+                   rfcview:rfc-cache-version))))
+
+(ert-deftest rfcview:test-update-cache-handles-nil-old-version ()
+  "Pre-versioning caches carry no :version key.  The migration must
+accept nil for OLD-VERSION without erroring."
+  (let ((rfcview:rfc-cache '(:last-modified (1 0)
+                             :favorite (4)
+                             :recent   (5))))
+    (rfcview:update-cache nil)
+    (should (equal (plist-get rfcview:rfc-cache :favorite) '(4)))
+    (should (equal (plist-get rfcview:rfc-cache :recent)   '(5)))))
 
 ;;; rfcview:save-cache
 

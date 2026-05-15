@@ -207,10 +207,19 @@ RFC is opened from the index buffer.")
                       '("January" "February" "March" "April" "May" "June" "July"
                         "August" "September" "October" "November" "December"))))
 
-(defconst rfcview:rfc-cache-default '(:last-modified (-33750 55928)))
+(defconst rfcview:rfc-cache-version 1
+  "Schema version of `rfcview:rfc-cache'.
+Bump when the on-disk layout changes incompatibly (new required
+keys, value-shape changes, etc.).  At load time, a cache whose
+`:version' does not match this constant is discarded and rebuilt
+from scratch by the next index refresh.")
+
+(defconst rfcview:rfc-cache-default
+  `(:version ,rfcview:rfc-cache-version :last-modified (-33750 55928)))
 
 ;; Cache structure
-;; (:last-modified lm-date
+;; (:version 1
+;;  :last-modified lm-date
 ;;  :table #s(hash-table
 ;;              size XXXX
 ;;              data (1 (:number 1
@@ -281,10 +290,37 @@ RFC is opened from the index buffer.")
       (insert-file-contents cache-file)
       (read (buffer-string)))))
 
+(defun rfcview:update-cache (old-version)
+  "Migrate `rfcview:rfc-cache' in place from OLD-VERSION to the current
+schema.  Preserves `:favorite' and `:recent' from the existing cache;
+all other slots are reset so the next index refresh rebuilds them.
+
+OLD-VERSION is the `:version' read from the loaded cache (or nil for
+a pre-versioning cache).  It is kept as an explicit argument so future
+per-version migration logic has a dispatch point — today every old
+version is migrated identically."
+  (ignore old-version)
+  (setq rfcview:rfc-cache
+        (list :version       rfcview:rfc-cache-version
+              :last-modified (plist-get rfcview:rfc-cache-default :last-modified)
+              :favorite      (plist-get rfcview:rfc-cache :favorite)
+              :recent        (plist-get rfcview:rfc-cache :recent))))
+
 (defun rfcview:load-cache ()
-  "Load cache from a file or set invalid cache data."
-  (setq rfcview:rfc-cache (or (rfcview:load-cache-internal rfcview:parsed-index-cache-file)
-                              rfcview:rfc-cache-default)))
+  "Load cache from disk into `rfcview:rfc-cache'.
+If the file is missing, fall back to `rfcview:rfc-cache-default'.
+If the loaded cache has a stale `:version', hand it to
+`rfcview:update-cache' — favorites and recents are carried forward;
+everything else is rebuilt by the next index refresh."
+  (let ((loaded (rfcview:load-cache-internal rfcview:parsed-index-cache-file)))
+    (cond
+     ((null loaded)
+      (setq rfcview:rfc-cache rfcview:rfc-cache-default))
+     ((equal (plist-get loaded :version) rfcview:rfc-cache-version)
+      (setq rfcview:rfc-cache loaded))
+     (t
+      (setq rfcview:rfc-cache loaded)
+      (rfcview:update-cache (plist-get loaded :version))))))
 
 (defun rfcview:save-cache ()
   "Save cache into a file."
