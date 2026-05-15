@@ -207,7 +207,7 @@ RFC is opened from the index buffer.")
                       '("January" "February" "March" "April" "May" "June" "July"
                         "August" "September" "October" "November" "December"))))
 
-(defconst rfcview:rfc-cache-version 1
+(defconst rfcview:rfc-cache-version 2
   "Schema version of `rfcview:rfc-cache'.
 Bump when the on-disk layout changes incompatibly (new required
 keys, value-shape changes, etc.).  At load time, a cache whose
@@ -218,22 +218,26 @@ from scratch by the next index refresh.")
   `(:version ,rfcview:rfc-cache-version :last-modified (-33750 55928)))
 
 ;; Cache structure
-;; (:version 1
+;; (:version 2
 ;;  :last-modified lm-date
 ;;  :table #s(hash-table
 ;;              size XXXX
 ;;              data (1 (:number 1
 ;;                       :title "Host Software."
 ;;                       :authors ("S. Crocker")
-;;                       :date "April 1969")
+;;                       :format ("TXT")
+;;                       :date "April 1969"
+;;                       :status nil)
 ;; ...
 ;;                   10 (:number 10
 ;;                       :title "Documentation conventions."
 ;;                       :authors ("S.D. Crocker")
+;;                       :format ("TXT")
 ;;                       :date "July 1969"
 ;;                       :obsoletes (RFC0003)
 ;;                       :obsoleted-by (RFC0016)
-;;                       :updated-by (RFC0024 RFC0027 RFC0030))
+;;                       :updated-by (RFC0024 RFC0027 RFC0030)
+;;                       :status nil)
 ;; ...)
 ;; :favorite (3 66 2039...)
 ;; :recent (2039 22 44 ...)

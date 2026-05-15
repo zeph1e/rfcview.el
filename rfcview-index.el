@@ -41,10 +41,12 @@ create the cache from scratch."
   "Parse an entry from rfc-index file."
   (with-current-buffer buffer
     (when (search-forward-regexp "^[0-9]\\{4\\} " nil t)
-      (let ((traits '((obsoletes    . "Obsoletes\\s-+")
+      (let ((traits '((format       . "Format:\\s-+")
+                      (obsoletes    . "Obsoletes\\s-+")
                       (obsoleted-by . "Obsoleted\\s-+by\\s-+")
                       (updates      . "Updates\\s-+")
-                      (updated-by   . "Updated\\s-+by\\s-+")))
+                      (updated-by   . "Updated\\s-+by\\s-+")
+                      (status       . "Status:\\s-+")))
             (beg (- (point) 6))
             end number title authors date trait-begin trait-results)
         (condition-case e
@@ -103,11 +105,18 @@ create the cache from scratch."
               (list :number number
                     :title title
                     :authors authors
+                    :format       (mapcar (lambda (s)
+                                            (replace-regexp-in-string "=.*\\'" "" s))
+                                          (cdr (assq 'format trait-results)))
                     :date date
                     :obsoletes    (cdr (assq 'obsoletes    trait-results))
                     :obsoleted-by (cdr (assq 'obsoleted-by trait-results))
                     :updates      (cdr (assq 'updates      trait-results))
-                    :updated-by   (cdr (assq 'updated-by   trait-results))))
+                    :updated-by   (cdr (assq 'updated-by   trait-results))
+                    :status       (let ((status
+                                         (cadr (assq 'status trait-results))))
+                                    (unless (string= "UNKNOWN" status)
+                                      status))))
           (error (rfcview:debug "parse error in rfc %d %S:\n%S"
                                 number (error-message-string e) (buffer-substring beg end))
                  (error "Parse index entry error!")))))))

@@ -139,6 +139,38 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
     (let ((entry (rfcview:parse-index-entry (current-buffer))))
       (should (member "RFC0010" (plist-get entry :obsoleted-by))))))
 
+(ert-deftest rfcview:test-parse-index-entry-format-strips-bytes-suffix ()
+  "The :format value drops the =NNNN bytes suffix from each token."
+  (with-temp-buffer
+    (insert rfcview-test:entry-rfc1)
+    (goto-char (point-min))
+    (let ((entry (rfcview:parse-index-entry (current-buffer))))
+      (should (equal '("TXT") (plist-get entry :format))))))
+
+(ert-deftest rfcview:test-parse-index-entry-status-unknown-becomes-nil ()
+  "A Status of UNKNOWN is normalized to nil."
+  (with-temp-buffer
+    (insert rfcview-test:entry-rfc1)
+    (goto-char (point-min))
+    (let ((entry (rfcview:parse-index-entry (current-buffer))))
+      (should (null (plist-get entry :status))))))
+
+(ert-deftest rfcview:test-parse-index-entry-status-internet-standard ()
+  "Parses a non-UNKNOWN Status as a string."
+  (with-temp-buffer
+    (insert rfcview-test:entry-rfc793)
+    (goto-char (point-min))
+    (let ((entry (rfcview:parse-index-entry (current-buffer))))
+      (should (string= "INTERNET STANDARD" (plist-get entry :status))))))
+
+(ert-deftest rfcview:test-parse-index-entry-status-proposed-standard ()
+  "Parses Status for an editor-credit entry."
+  (with-temp-buffer
+    (insert rfcview-test:entry-with-editor)
+    (goto-char (point-min))
+    (let ((entry (rfcview:parse-index-entry (current-buffer))))
+      (should (string= "PROPOSED STANDARD" (plist-get entry :status))))))
+
 (ert-deftest rfcview:test-parse-index-entry-returns-nil-at-end-of-buffer ()
   "Returns nil when there are no more entries in the buffer."
   (with-temp-buffer
