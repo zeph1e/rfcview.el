@@ -1369,6 +1369,100 @@ that regex fails to match a line that contains only \\r (from CRLF)."
       (rfcview:read-rfc 8)
       (should-not downloaded))))
 
+;;; ─── rfcview:read-forward-link / rfcview:read-backward-link ─────────────────
+
+(defun rfcview:test--make-link-buffer ()
+  "Build a buffer with a button, a goto-address overlay, and another button.
+Leading and trailing space ensures point-min/point-max are not inside a link.
+Link positions: button at 3..10, URL overlay at 17..24, button at 31..38."
+  (let ((buf (generate-new-buffer " *link-test*")))
+    (with-current-buffer buf
+      (insert "  AAAAAAAA      BBBBBBBB      CCCCCCCC  ")
+      (make-text-button 3 11 'type 'rfcview:rfc-link-button)
+      (let ((ov (make-overlay 17 25)))
+        (overlay-put ov 'goto-address t))
+      (make-text-button 31 39 'type 'rfcview:rfc-link-button))
+    buf))
+
+(ert-deftest rfcview:test-read-forward-link-single-step-finds-button ()
+  "TAB from before the first link jumps to it."
+  (let ((buf (rfcview:test--make-link-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (goto-char (point-min))
+          (rfcview:read-forward-link)
+          (should (= (point) 3)))
+      (kill-buffer buf))))
+
+(ert-deftest rfcview:test-read-forward-link-single-step-finds-goto-address ()
+  "TAB from inside the first button jumps to the goto-address overlay."
+  (let ((buf (rfcview:test--make-link-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (goto-char 5)
+          (rfcview:read-forward-link)
+          (should (= (point) 17)))
+      (kill-buffer buf))))
+
+(ert-deftest rfcview:test-read-forward-link-single-step-skips-from-url-to-next-button ()
+  "TAB from inside the URL jumps to the next button."
+  (let ((buf (rfcview:test--make-link-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (goto-char 20)
+          (rfcview:read-forward-link)
+          (should (= (point) 31)))
+      (kill-buffer buf))))
+
+(ert-deftest rfcview:test-read-forward-link-no-next-errors ()
+  "TAB past the last link signals a user-error."
+  (let ((buf (rfcview:test--make-link-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (goto-char (point-max))
+          (should-error (rfcview:read-forward-link) :type 'user-error))
+      (kill-buffer buf))))
+
+(ert-deftest rfcview:test-read-backward-link-single-step ()
+  "S-TAB from past the last link jumps backward to the last button."
+  (let ((buf (rfcview:test--make-link-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (goto-char (point-max))
+          (rfcview:read-backward-link)
+          (should (= (point) 31)))
+      (kill-buffer buf))))
+
+(ert-deftest rfcview:test-read-backward-link-finds-goto-address ()
+  "S-TAB from inside the last button jumps to the URL overlay."
+  (let ((buf (rfcview:test--make-link-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (goto-char 33)
+          (rfcview:read-backward-link)
+          (should (= (point) 17)))
+      (kill-buffer buf))))
+
+(ert-deftest rfcview:test-read-forward-link-prefix-arg-multi-step ()
+  "Prefix arg moves N links forward."
+  (let ((buf (rfcview:test--make-link-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (goto-char (point-min))
+          (rfcview:read-forward-link 3)
+          (should (= (point) 31)))
+      (kill-buffer buf))))
+
+(ert-deftest rfcview:test-read-forward-link-zero-arg-is-noop ()
+  "n=0 does not move point."
+  (let ((buf (rfcview:test--make-link-buffer)))
+    (unwind-protect
+        (with-current-buffer buf
+          (goto-char 13)
+          (rfcview:read-forward-link 0)
+          (should (= (point) 13)))
+      (kill-buffer buf))))
+
 ;;; ─── rfcview:read-show-help ──────────────────────────────────────────────────
 
 (ert-deftest rfcview:test-read-show-help-keys-match-keymap ()

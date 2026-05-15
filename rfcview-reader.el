@@ -168,19 +168,41 @@ list items like \"3.  Foo, bar.\" are still rejected.")
       (goto-char orig)
       (message "No previous section"))))
 
-(defun rfcview:read--link-positions ()
-  "Sorted list of start positions for every link in the buffer.
-Includes both `button' objects (RFC and TOC references) and
-`goto-address-mode' URL/email overlays."
-  (let (positions)
-    (let ((b (point-min)))
-      (while (setq b (next-button b))
-        (push (button-start b) positions)
-        (setq b (button-end b))))
-    (dolist (ov (overlays-in (point-min) (point-max)))
-      (when (overlay-get ov 'goto-address)
-        (push (overlay-start ov) positions)))
-    (sort (delete-dups positions) #'<)))
+(defun rfcview:read--next-goto-address (pos)
+  "Position of the next `goto-address' overlay strictly after POS, or nil."
+  (let ((p (next-overlay-change pos))
+        found)
+    (while (and (not found) p (< p (point-max)))
+      (if (cl-some (lambda (ov) (overlay-get ov 'goto-address))
+                   (overlays-at p))
+          (setq found p)
+        (setq p (next-overlay-change p))))
+    found))
+
+(defun rfcview:read--prev-goto-address (pos)
+  "Position of the previous `goto-address' overlay strictly before POS, or nil."
+  (let ((p (previous-overlay-change pos))
+        found)
+    (while (and (not found) p (> p (point-min)))
+      (if (cl-some (lambda (ov) (overlay-get ov 'goto-address))
+                   (overlays-at p))
+          (setq found p)
+        (setq p (previous-overlay-change p))))
+    found))
+
+(defun rfcview:read--find-link (pos forward)
+  "Position of the next link from POS, going FORWARD when non-nil.
+Considers both buttons and `goto-address-mode' URL/email overlays."
+  (let* ((btn (if forward (next-button pos) (previous-button pos)))
+         (btn-pos (and btn (button-start btn)))
+         (addr-pos (if forward
+                       (rfcview:read--next-goto-address pos)
+                     (rfcview:read--prev-goto-address pos))))
+    (cond
+     ((and btn-pos addr-pos)
+      (if forward (min btn-pos addr-pos) (max btn-pos addr-pos)))
+     (btn-pos)
+     (addr-pos))))
 
 (defun rfcview:read-forward-link (&optional n)
   "Move to the next link after point.
@@ -188,23 +210,15 @@ Considers both buttons and URLs highlighted by `goto-address-mode'.
 With prefix N, move N links forward; negative N moves backward."
   (interactive "p")
   (setq n (or n 1))
-  (let ((positions (rfcview:read--link-positions))
-        (pos (point)))
-    (cond
-     ((zerop n) nil)
-     ((> n 0)
-      (let ((rest positions))
-        (while (and rest (<= (car rest) pos)) (setq rest (cdr rest)))
-        (if (>= (length rest) n)
-            (goto-char (nth (1- n) rest))
-          (user-error "No next link"))))
-     (t
-      (let ((before nil) (m (- n)))
-        (dolist (p positions)
-          (when (< p pos) (push p before)))
-        (if (>= (length before) m)
-            (goto-char (nth (1- m) before))
-          (user-error "No previous link")))))))
+  (unless (zerop n)
+    (let ((forward (> n 0))
+          (count (abs n))
+          target)
+      (dotimes (_ count)
+        (setq target (rfcview:read--find-link (point) forward))
+        (if target
+            (goto-char target)
+          (user-error (if forward "No next link" "No previous link")))))))
 
 (defun rfcview:read-backward-link (&optional n)
   "Move to the previous link before point.
