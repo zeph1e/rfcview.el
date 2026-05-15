@@ -139,10 +139,10 @@ list items like \"3.  Foo, bar.\" are still rejected.")
     (define-key map (kbd "C-c C-f") 'rfcview:read-history-forward)
 
     ;; font scale
-    (define-key map (kbd "0") 'text-scale-adjust)
-    (define-key map (kbd "-") 'text-scale-adjust)
-    (define-key map (kbd "+") 'text-scale-adjust)
-    (define-key map (kbd "=") 'text-scale-adjust)
+    (define-key map [(?0)] 'text-scale-adjust)
+    (define-key map [(?-)] 'text-scale-adjust)
+    (define-key map [(?+)] 'text-scale-adjust)
+    (define-key map [(?=)] 'text-scale-adjust)
 
     (define-key map (kbd "RET") 'push-button)
 
