@@ -93,9 +93,11 @@ Fallback lookup for TOC entries without a section number.")
    ;; Appendix (RFC 791 era, all-caps colon): "APPENDIX A:  Title"
    "\\|^\nAPPENDIX [A-Z]:[ \t]+[A-Z][^\n]*\n\n"
    "\\|^\nAPPENDIX [IVX]+[ \t]+-[ \t]+[A-Z][^\n]*\n\n"
-   ;; Appendix subsection: "A.1.  Title" / "B.10 Title" (1-2 digit number to avoid X.509
-   ;; false hits), also handles a title that wraps onto one indented continuation line.
-   "\\|^\n[A-Z]\\.[0-9]\\{1,2\\}\\.?[ \t]+[A-Z][^\n]*\\(?:\n[ \t]\\{5,\\}[^\n]+\\)?\n\n"
+   ;; Appendix subsection: "A.1.  Title" / "B.10 Title" / "A.4.1. Title" (1-2 digit
+   ;; per segment to avoid X.509-style false hits; one or more segments to support
+   ;; arbitrary nesting depth), also handles a title that wraps onto one indented
+   ;; continuation line.
+   "\\|^\n[A-Z]\\(?:\\.[0-9]\\{1,2\\}\\)+\\.?[ \t]+[A-Z][^\n]*\\(?:\n[ \t]\\{5,\\}[^\n]+\\)?\n\n"
    ;; ALL-CAPS bare-word headings (RFC 854/959/1122 era):
    ;; "INTRODUCTION" / "GENERAL CONSIDERATIONS" / "LINK LAYER REFERENCES"
    "\\|^\n[A-Z][-A-Z() ]\\{,50\\}[A-Z]\n\n"
@@ -270,7 +272,7 @@ ALL-CAPS, Abstract, etc.)."
                marker rfcview:read-section-anchors-by-number)
       (puthash (rfcview:read--normalize-title (match-string 2 heading-line))
                marker rfcview:read-section-anchors-by-title))
-     ((string-match "\\`\\([A-Z]\\.[0-9]+\\(?:\\.[0-9]+\\)?\\)\\.?[ \t]+\\(.*\\)"
+     ((string-match "\\`\\([A-Z]\\(?:\\.[0-9]+\\)+\\)\\.?[ \t]+\\(.*\\)"
                     heading-line)
       (puthash (match-string 1 heading-line)
                marker rfcview:read-section-anchors-by-number)
@@ -409,16 +411,29 @@ has already wrapped in a `rfcview:section-link-button'."
                                (recenter 0)))))
                'help-echo "Jump to section"))
 
-(defun rfcview:read--dim-toc-tail (title-end-on-line-1)
-  "Dim everything past TITLE-END-ON-LINE-1 to end of line.
-Applies `rfcview:read-toc-leader-face' to any dot leader, trailing page
-number, and intervening whitespace.  No-op when the title already ends
-at end-of-line (TOCs without leaders, like RFC 9227)."
-  (let ((eol (save-excursion (goto-char title-end-on-line-1)
-                             (line-end-position))))
-    (when (> eol title-end-on-line-1)
-      (put-text-property title-end-on-line-1 eol
-                         'face 'rfcview:read-toc-leader-face))))
+(defun rfcview:read--dim-toc-tail (title-end-on-line-1 &optional entry-end)
+  "Dim the dot-leader and trailing page number of a TOC entry.
+TITLE-END-ON-LINE-1 is the position of the title's end on the first line.
+ENTRY-END, when given, bounds a wrapped entry — dim line 1 from
+TITLE-END-ON-LINE-1 to EOL, then walk forward and dim the leader on each
+continuation line up to ENTRY-END.  This handles entries where the leader
+sits on a continuation line (e.g. RFC 5246 F.1.1.3).  A no-op when there
+is nothing to dim (TOCs without leaders, like RFC 9227)."
+  (save-excursion
+    (goto-char title-end-on-line-1)
+    (let ((eol-1 (line-end-position)))
+      (when (> eol-1 title-end-on-line-1)
+        (put-text-property title-end-on-line-1 eol-1
+                           'face 'rfcview:read-toc-leader-face)))
+    (when entry-end
+      (forward-line 1)
+      (while (< (point) entry-end)
+        (when (re-search-forward
+               "\\([ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)[ \t]*$"
+               (line-end-position) t)
+          (put-text-property (match-beginning 1) (line-end-position)
+                             'face 'rfcview:read-toc-leader-face))
+        (forward-line 1)))))
 
 (defun rfcview:read--absorb-toc-continuations (title-beg title-end limit)
   "Extend a TOC title that wraps onto continuation lines.
@@ -426,7 +441,12 @@ TITLE-BEG and TITLE-END bracket the title text already matched on the
 current line; point must be on that line.  LIMIT bounds the search.
 Returns a cons (NEW-TITLE-END . LINES-CONSUMED).  A line counts as a
 continuation if it is non-blank, indented to or past TITLE-BEG's column,
-and does not start with a section number or \"Appendix\"."
+and does not start with a section number or \"Appendix\".
+
+On each absorbed line, NEW-TITLE-END is the start of the dot-leader if one
+is present (so the section-link button can be shrunk to exclude the
+leader, otherwise its overlay face would override the dim).  When the
+absorbed line has no leader, NEW-TITLE-END is end-of-line."
   (let ((title-col (save-excursion (goto-char title-beg) (current-column)))
         (te title-end)
         (extra 0))
@@ -435,11 +455,18 @@ and does not start with a section number or \"Appendix\"."
       (while (and (< (point) limit)
                   (looking-at "^[ \t]+[^ \t\n]")
                   (not (looking-at "^[ \t]*[0-9]"))
+                  (not (looking-at "^[ \t]*[A-Z]\\.[0-9]"))
                   (not (looking-at "^[ \t]*Appendix[ \t]"))
                   (let ((c (save-excursion (skip-chars-forward " \t")
                                            (current-column))))
                     (>= c title-col)))
-        (setq te (line-end-position))
+        (setq te (save-excursion
+                   (beginning-of-line)
+                   (if (re-search-forward
+                        "[ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+[ \t]*$"
+                        (line-end-position) t)
+                       (match-beginning 0)
+                     (line-end-position))))
         (setq extra (1+ extra))
         (forward-line 1)))
     (cons te extra)))
@@ -483,10 +510,11 @@ or if the anchor tables are empty."
                       (setq extra (cdr cont))
                       (when target
                         (rfcview:read--make-section-button tb te target))
-                      (rfcview:read--dim-toc-tail line1-te)))
-                   ;; Appendix subsection: "   A.1  Foo ........... 30"
+                      (rfcview:read--dim-toc-tail line1-te te)))
+                   ;; Appendix subsection: "   A.1  Foo ......... 30",
+                   ;; nesting may go arbitrary depth ("A.4.1", "A.4.1.1", ...).
                    ((looking-at
-                     "^[ \t]*\\([A-Z]\\.[0-9]+\\(?:\\.[0-9]+\\)?\\)\\.?[ \t]+\\(.+?\\)\\(?:[ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)?[ \t]*$")
+                     "^[ \t]*\\([A-Z]\\(?:\\.[0-9]+\\)+\\)\\.?[ \t]+\\(.+?\\)\\(?:[ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)?[ \t]*$")
                     (let* ((num (match-string-no-properties 1))
                            (tb (match-beginning 2))
                            (line1-te (match-end 2))
@@ -496,7 +524,7 @@ or if the anchor tables are empty."
                       (setq extra (cdr cont))
                       (when target
                         (rfcview:read--make-section-button tb te target))
-                      (rfcview:read--dim-toc-tail line1-te)))
+                      (rfcview:read--dim-toc-tail line1-te te)))
                    ;; Appendix: "   Appendix A.  Title ......... 30"
                    ((looking-at
                      "^[ \t]*Appendix[ \t]+\\([A-Z]\\)\\.?[ \t]+\\(.+?\\)\\(?:[ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)?[ \t]*$")
@@ -509,7 +537,7 @@ or if the anchor tables are empty."
                       (setq extra (cdr cont))
                       (when target
                         (rfcview:read--make-section-button tb te target))
-                      (rfcview:read--dim-toc-tail line1-te)))
+                      (rfcview:read--dim-toc-tail line1-te te)))
                    ;; Unnumbered: "   Acknowledgements ........... 25"
                    ((looking-at
                      "^[ \t]*\\([A-Z][^\n]*?\\)\\(?:[ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)?[ \t]*$")

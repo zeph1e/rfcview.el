@@ -955,6 +955,80 @@ range so clicking on the digits jumps to the section, not the cross-RFC."
       (should (= 1 (length btns)))
       (should (string-match-p "Registry" (car (car btns)))))))
 
+(ert-deftest rfcview:test-read-buttonize-toc-wrapped-leader-on-continuation ()
+  "When a wrapped TOC entry's dot-leader and page number sit on the continuation
+line (RFC 5246 F.1.1.3 \"Diffie-Hellman Key Exchange with / Authentication\"),
+the continuation-line leader visually dims, and the section-link button stops
+at the leader (otherwise the button overlay's face would mask the dim)."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "                  F.1.1.3. Diffie-Hellman Key Exchange with\n"
+            "                           Authentication ............................92\n"
+            "\n"
+            "F.1.1.3. Diffie-Hellman Key Exchange with Authentication\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (goto-char (point-min))
+    (re-search-forward "^                           Authentication")
+    (let* ((bol (line-beginning-position))
+           (eol (line-end-position))
+           (dot-pos (save-excursion (re-search-forward " \\.+" eol t)
+                                    (match-beginning 0))))
+      ;; The button must end at-or-before the dot leader.
+      (let ((button (button-at (1+ bol))))
+        (should button)
+        (should (<= (button-end button) dot-pos)))
+      ;; The dot leader and page number must visually show leader-face.
+      (should (eq (get-char-property dot-pos 'face)
+                  'rfcview:read-toc-leader-face))
+      (should (eq (get-char-property (- eol 1) 'face)
+                  'rfcview:read-toc-leader-face)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-deeply-nested-appendix-subsection ()
+  "Appendix-subsection TOC entries deeper than two segments (e.g. A.4.1) get
+their own buttons and dim, not absorbed as continuations of the parent A.4 entry
+(regression for RFC 5246, which has A.4 followed by A.4.1 .. A.4.4)."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "      A.4. Handshake Protocol ........................................70\n"
+            "           A.4.1. Hello Messages .....................................71\n"
+            "           A.4.2. Server Authentication ..............................72\n"
+            "\n"
+            "A.4. Handshake Protocol\n"
+            "\n"
+            "   Body.\n"
+            "\n"
+            "A.4.1. Hello Messages\n"
+            "\n"
+            "   Body.\n"
+            "\n"
+            "A.4.2. Server Authentication\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let ((btns (rfcview-test:section-buttons)))
+      (should (assoc "Handshake Protocol" btns))
+      (should (assoc "Hello Messages" btns))
+      (should (assoc "Server Authentication" btns)))
+    ;; The A.4.1 TOC line should have its leader+page-number dimmed (i.e. NOT
+    ;; have been swallowed by A.4's continuation absorption).
+    (goto-char (point-min))
+    (re-search-forward "^           A\\.4\\.1\\. Hello Messages")
+    (let ((bol (line-beginning-position))
+          (eol (line-end-position))
+          (any-leader nil))
+      (let ((p bol))
+        (while (< p eol)
+          (when (eq (get-text-property p 'face) 'rfcview:read-toc-leader-face)
+            (setq any-leader t))
+          (setq p (1+ p))))
+      (should any-leader))))
+
 (ert-deftest rfcview:test-read-buttonize-toc-deeply-nested-numeric ()
   "TOC entry with a three-segment section number (18.4.5) resolves correctly."
   (with-temp-buffer
