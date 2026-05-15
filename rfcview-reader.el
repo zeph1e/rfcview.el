@@ -516,12 +516,17 @@ or if the anchor tables are empty."
         (overlay-put ov 'evaporate t)))))
 
 (defun rfcview:read-quit ()
-  "Bury the RFC reader buffer and refocus the index window if visible."
+  "Bury the RFC reader buffer and return to the RFC index.
+If the `*RFC INDEX*' window is visible, select it.  Otherwise, if
+the buffer still exists, switch to it in the current window.  If
+the index buffer has been killed, just bury the reader."
   (interactive)
   (bury-buffer)
-  (let ((index-win (get-buffer-window "*RFC INDEX*")))
-    (when index-win
-      (select-window index-win))))
+  (let* ((buffer (get-buffer "*RFC INDEX*"))
+         (index-win (and buffer (get-buffer-window buffer))))
+    (cond
+     (index-win (select-window index-win))
+     (buffer    (switch-to-buffer buffer)))))
 
 (defun rfcview:read-show-help ()
   "Show a help buffer listing rfcview read mode keybindings."

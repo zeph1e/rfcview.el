@@ -1398,22 +1398,53 @@ that regex fails to match a line that contains only \\r (from CRLF)."
 
 (ert-deftest rfcview:test-read-quit-selects-index-when-visible ()
   "rfcview:read-quit selects the index window when it is visible."
-  (let ((fake-win (make-symbol "win"))
+  (let ((fake-buf (make-symbol "buf"))
+        (fake-win (make-symbol "win"))
         selected)
     (cl-letf (((symbol-function 'bury-buffer)      #'ignore)
+              ((symbol-function 'get-buffer)        (lambda (_) fake-buf))
               ((symbol-function 'get-buffer-window) (lambda (_) fake-win))
               ((symbol-function 'select-window)     (lambda (w) (setq selected w))))
       (rfcview:read-quit)
       (should (eq selected fake-win)))))
 
-(ert-deftest rfcview:test-read-quit-no-select-when-index-hidden ()
-  "rfcview:read-quit does not select any window when the index is not visible."
-  (let (selected)
-    (cl-letf (((symbol-function 'bury-buffer)      #'ignore)
+(ert-deftest rfcview:test-read-quit-switches-to-index-when-buffer-exists-but-hidden ()
+  "rfcview:read-quit switches to the index buffer when it exists but is not displayed."
+  (let ((fake-buf (make-symbol "buf"))
+        switched)
+    (cl-letf (((symbol-function 'bury-buffer)       #'ignore)
+              ((symbol-function 'get-buffer)        (lambda (_) fake-buf))
               ((symbol-function 'get-buffer-window) (lambda (_) nil))
-              ((symbol-function 'select-window)     (lambda (w) (setq selected w))))
+              ((symbol-function 'switch-to-buffer)  (lambda (b) (setq switched b))))
       (rfcview:read-quit)
-      (should-not selected))))
+      (should (eq switched fake-buf)))))
+
+(ert-deftest rfcview:test-read-quit-no-action-when-index-buffer-killed ()
+  "rfcview:read-quit does nothing extra when the index buffer has been killed."
+  (let (selected switched)
+    (cl-letf (((symbol-function 'bury-buffer)       #'ignore)
+              ((symbol-function 'get-buffer)        (lambda (_) nil))
+              ((symbol-function 'select-window)     (lambda (w) (setq selected w)))
+              ((symbol-function 'switch-to-buffer)  (lambda (b) (setq switched b))))
+      (rfcview:read-quit)
+      (should-not selected)
+      (should-not switched))))
+
+(ert-deftest rfcview:test-read-quit-integration-selects-real-index-window ()
+  "End-to-end: rfcview:read-quit selects the live `*RFC INDEX*' window."
+  (let ((reader (get-buffer-create "*RFC 0001*"))
+        (index  (get-buffer-create "*RFC INDEX*")))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer reader)
+          (let ((index-win (split-window-below)))
+            (set-window-buffer index-win index)
+            (select-window (get-buffer-window reader))
+            (rfcview:read-quit)
+            (should (eq (selected-window) index-win))))
+      (kill-buffer reader)
+      (kill-buffer index))))
 
 (provide 'test-rfcview-reader)
 ;;; test-rfcview-reader.el ends here
