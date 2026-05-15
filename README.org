@@ -16,7 +16,7 @@
 - Browse the full up-to-date IETF RFC index with fancy and informative look.
 - Filter by favorites, recently read, or keyword search (scored and ranked)
 - Automatically download and display RFCs on demand.
-- PDF fallback when the plain-text edition is unavailable (requires pdf-tools)
+- Multi-format support driven by the rfc-index: TXT and PDF render inside Emacs (PDF requires pdf-tools); HTML and XML open in the browser via =browse-url=
 - Rich read mode:
   - Applying style to RFC document
   - Jump by section
@@ -90,13 +90,26 @@ In an RFC read buffer:
 | =?=                   | Help                                                            |
 | =q=                   | Quit (refocus index if visible)                                 |
 
-* PDF support
+* Reading formats
 
-** PDF Fallback
+rfcview reads the =(Format: ...)= trailer of each entry in the rfc-index and only tries formats the index advertises. The four supported values for =rfcview:preferred-format= are:
 
-Some RFCs only present as PDF (e.g. RFC 8).  rfcview automatically falls back to PDF when a plain-text edition returns a 404 response, and also checks for a locally cached =.pdf= file before attempting a download.
+| Value   | Where it opens                                  | Cached locally? |
+|---------+-------------------------------------------------+-----------------|
+| =txt=   | Emacs read mode (default)                       | yes             |
+| =pdf=   | Emacs =pdf-view-mode= (requires pdf-tools)      | yes             |
+| =html=  | External browser via =browse-url=               | no              |
+| =xml=   | External browser via =browse-url=               | no              |
 
-Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]].  rfcview does not declare a hard dependency on it; if pdf-tools is not installed, opening a PDF-only RFC signals an error.  Example setups:
+** Selection rules
+
+When the index lists =rfcview:preferred-format=, it leads; the remaining listed supported formats follow as fallback (so a broken =txt= link can still resolve to =pdf= if the index lists both). When the index does *not* list the preferred format, it is dropped — the index is authoritative — and the listed supported formats are tried instead. If nothing supported is listed, rfcview reports the RFC as unavailable.
+
+Some RFCs only present as PDF (e.g. RFC 8); rfcview picks up the index's =(Format: PDF=...)= and opens the PDF directly. Likewise for HTML/XML-only entries.
+
+** PDF support
+
+Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]]. rfcview does not declare a hard dependency on it; if pdf-tools is not installed, opening a PDF-only RFC signals an error. Example setup:
 
 #+BEGIN_SRC emacs-lisp
 (use-package pdf-tools
@@ -106,15 +119,13 @@ Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]].  rfcvi
   (pdf-tools-install :no-query))
 #+END_SRC
 
-** Forcing PDF Only
-
-To always open RFCs as PDF (even when a plain-text edition exists), customize =rfcview:preferred-format=:
+** Customizing the preferred format
 
 #+BEGIN_SRC emacs-lisp
   (use-package rfcview
     :vc (:url "https://github.com/zeph1e/rfcview.el" :rev :newest)
     :commands rfcview
-    :custom (rfcview:preferred-format 'pdf))
+    :custom (rfcview:preferred-format 'pdf))   ; or 'txt, 'html, 'xml
 #+END_SRC
 
 * License

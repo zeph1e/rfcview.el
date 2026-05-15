@@ -48,12 +48,25 @@
   :group 'rfcview)
 
 (defcustom rfcview:preferred-format 'txt
-  "Preferred format for reading RFC documents, either \\='txt or \\='pdf.
-Plain text is tried first when \\='txt; PDF is tried first when \\='pdf.
-The other format is used as a fallback if the preferred one is unavailable.
-PDF viewing requires pdf-tools."
+  "Preferred format for reading RFC documents.
+One of \\='txt, \\='pdf, \\='html, or \\='xml.
+
+When the rfc-index `(Format: ...)' trailer lists this format, it is
+tried first and the remaining listed formats follow in canonical
+order as fallback.  When the index does not advertise this format,
+it is dropped — the index is authoritative — and the listed supported
+formats are tried instead.  If nothing supported is listed (no
+`:format' info, or only unsupported tokens like \"PS\"), the RFC
+is reported unavailable.
+
+`txt' and `pdf' are downloaded to `rfcview:local-directory' and opened
+in Emacs (PDF viewing requires pdf-tools).  `html' and `xml' are
+opened in the user's browser via `browse-url' and are not cached
+locally."
   :type '(choice (const :tag "Plain text" txt)
-                 (const :tag "PDF" pdf))
+                 (const :tag "PDF" pdf)
+                 (const :tag "HTML (browser)" html)
+                 (const :tag "XML (browser)" xml))
   :group 'rfcview)
 
 (defcustom rfcview:use-face t

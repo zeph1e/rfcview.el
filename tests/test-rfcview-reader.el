@@ -1494,9 +1494,10 @@ that regex fails to match a line that contains only \\r (from CRLF)."
 (ert-deftest rfcview:test-read-rfc-falls-back-to-pdf-when-txt-unavailable ()
   "read-rfc falls back to PDF when the txt download returns nil (404)."
   (let ((rfcview:local-directory "/nonexistent/dir/")
-        (rfcview:preferred-format 'txt)
         opened-fmt)
-    (cl-letf (((symbol-function 'file-exists-p) (lambda (_) nil))
+    (cl-letf (((symbol-function 'rfcview:read--format-order)
+               (lambda (&rest _) '(txt pdf)))
+              ((symbol-function 'file-exists-p) (lambda (_) nil))
               ((symbol-function 'rfcview:download-rfc)
                (lambda (_number fmt file) (if (eq fmt 'pdf) file nil)))
               ((symbol-function 'rfcview:open-rfc-pdf)
@@ -1508,9 +1509,10 @@ that regex fails to match a line that contains only \\r (from CRLF)."
 (ert-deftest rfcview:test-read-rfc-preferred-pdf-falls-back-to-txt ()
   "When preferred-format is pdf but PDF download fails, falls back to txt."
   (let ((rfcview:local-directory "/nonexistent/dir/")
-        (rfcview:preferred-format 'pdf)
         opened-fmt)
-    (cl-letf (((symbol-function 'file-exists-p) (lambda (_) nil))
+    (cl-letf (((symbol-function 'rfcview:read--format-order)
+               (lambda (&rest _) '(pdf txt)))
+              ((symbol-function 'file-exists-p) (lambda (_) nil))
               ((symbol-function 'rfcview:download-rfc)
                (lambda (_number fmt file) (if (eq fmt 'txt) file nil)))
               ((symbol-function 'rfcview:open-rfc-txt)
@@ -1522,9 +1524,10 @@ that regex fails to match a line that contains only \\r (from CRLF)."
 (ert-deftest rfcview:test-read-rfc-uses-cached-pdf-without-downloading ()
   "read-rfc uses a locally cached PDF without calling download-rfc."
   (let ((rfcview:local-directory "/fake/dir/")
-        (rfcview:preferred-format 'pdf)
         downloaded)
-    (cl-letf (((symbol-function 'file-exists-p)
+    (cl-letf (((symbol-function 'rfcview:read--format-order)
+               (lambda (&rest _) '(pdf)))
+              ((symbol-function 'file-exists-p)
                (lambda (f) (string-suffix-p ".pdf" f)))
               ((symbol-function 'rfcview:download-rfc)
                (lambda (&rest _) (setq downloaded t) nil))
@@ -1930,6 +1933,44 @@ that broke in real read-mode buffers."
             (should (eq (selected-window) index-win))))
       (kill-buffer reader)
       (kill-buffer index))))
+
+;;; ─── rfcview:read--format-order ────────────────────────────────────────────
+
+(ert-deftest rfcview:test-read-format-order-preferred-leads-when-listed ()
+  "Preferred leads the result when it appears in AVAILABLE."
+  (should (equal '(txt pdf)  (rfcview:read--format-order 'txt  '("TXT" "PDF"))))
+  (should (equal '(pdf txt)  (rfcview:read--format-order 'pdf  '("TXT" "PDF"))))
+  (should (equal '(html)     (rfcview:read--format-order 'html '("HTML"))))
+  (should (equal '(xml)      (rfcview:read--format-order 'xml  '("XML")))))
+
+(ert-deftest rfcview:test-read-format-order-preferred-dropped-when-not-listed ()
+  "Preferred is dropped when the index does not advertise it."
+  (should (equal '(txt pdf) (rfcview:read--format-order 'html '("TXT" "PDF"))))
+  (should (equal '(html)    (rfcview:read--format-order 'txt  '("HTML"))))
+  (should (equal '(html)    (rfcview:read--format-order 'pdf  '("HTML")))))
+
+(ert-deftest rfcview:test-read-format-order-empty-available-returns-nil ()
+  "No supported format listed → return nil (caller treats as unavailable)."
+  (should (null (rfcview:read--format-order 'txt  nil)))
+  (should (null (rfcview:read--format-order 'pdf  nil)))
+  (should (null (rfcview:read--format-order 'html nil)))
+  (should (null (rfcview:read--format-order 'xml  nil)))
+  (should (null (rfcview:read--format-order 'txt  '("PS" "EPUB")))))
+
+(ert-deftest rfcview:test-read-format-order-no-duplicate-preferred ()
+  "Preferred is not duplicated when it also appears in AVAILABLE."
+  (should (equal '(txt)  (rfcview:read--format-order 'txt  '("TXT"))))
+  (should (equal '(html) (rfcview:read--format-order 'html '("HTML")))))
+
+(ert-deftest rfcview:test-read-format-order-case-insensitive ()
+  "AVAILABLE strings are matched case-insensitively."
+  (should (equal '(txt) (rfcview:read--format-order 'txt '("txt"))))
+  (should (equal '(pdf) (rfcview:read--format-order 'pdf '("Pdf"))))
+  (should (equal '(txt pdf) (rfcview:read--format-order 'txt '("pdf" "txt")))))
+
+(ert-deftest rfcview:test-read-format-order-unsupported-tokens-filtered ()
+  "Tokens outside `rfcview:supported-formats' (PS, EPUB, …) are dropped."
+  (should (equal '(txt) (rfcview:read--format-order 'txt '("TXT" "PS" "EPUB")))))
 
 (provide 'test-rfcview-reader)
 ;;; test-rfcview-reader.el ends here

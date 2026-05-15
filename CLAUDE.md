@@ -63,7 +63,7 @@ All `defcustom` declarations (group `rfcview`) and most `defface` definitions li
 
 Note: `rfcview:read-rfc-header-face`, `rfcview:read-rfc-title-face`, and `rfcview:read-rfc-section-face` are defined in `rfcview-reader.el`, not here — they are reader-specific and not needed in the index.
 
-`rfcview:preferred-format` (`'txt` or `'pdf`) controls which format is tried first when opening an RFC. Both the local cache lookup and the download fallback respect this order.
+`rfcview:preferred-format` (one of `'txt`, `'pdf`, `'html`, `'xml`) is the user's preferred format for opening an RFC. The actual try-order is computed by `rfcview:read--format-order` from the cached `:format` list of each entry — only formats the rfc-index advertises are tried, and if `preferred-format` is not listed it is dropped (index is authoritative). `txt`/`pdf` are downloaded and opened in Emacs; `html`/`xml` are handed to `browse-url` and are not cached locally.
 
 `rfcview:wrap-text-at-word-boundary` is used only for the filter line in the index (which has mixed propertized strings). Entry text is laid out using Emacs's `word-wrap` mode with `wrap-prefix` text properties instead.
 
@@ -83,7 +83,7 @@ Cache is saved to disk via `rfcview:index-cleanup`, which is registered on both 
 
 ### rfcview-reader.el — RFC document read mode
 
-**Read mode** (`*RFC XXXX*` buffer, `rfcview:read-mode`) — RFC files are downloaded once and cached locally under `rfcview:local-directory` (`~/.emacs.d/.RFC/`). Format selection (txt vs pdf) follows `rfcview:preferred-format`; the other format is tried as a fallback. `rfcview:download-rfc` handles a single format and returns `nil` on 404; `rfcview:read-rfc` drives the preference-ordered loop via the `rfcview:open-rfc-functions` alist (`txt → rfcview:open-rfc-txt`, `pdf → rfcview:open-rfc-pdf`).
+**Read mode** (`*RFC XXXX*` buffer, `rfcview:read-mode`) — `txt`/`pdf` RFCs are downloaded once and cached locally under `rfcview:local-directory` (`~/.emacs.d/.RFC/`); `html`/`xml` are handed to `browse-url` and not cached. Format selection is driven by `rfcview:read--format-order`, which returns the intersection of `rfcview:supported-formats` and the entry's cached `:format` list (preferred first when listed; preferred dropped when not listed; nil when nothing supported is listed). `rfcview:download-rfc` handles a single locally-cached format and returns `nil` on 404. `rfcview:read-rfc` dispatches each candidate via the `rfcview:open-rfc-functions` alist (`txt → rfcview:open-rfc-txt`, `pdf → rfcview:open-rfc-pdf`); a missing/nil entry falls through to `rfcview:open-rfc-fallback`, which calls `browse-url` and ends the search.
 
 On load of a text RFC, five post-processing steps run (in call order):
 
