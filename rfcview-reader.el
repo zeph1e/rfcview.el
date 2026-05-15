@@ -135,6 +135,8 @@ list items like \"3.  Foo, bar.\" are still rejected.")
     (define-key map (kbd "<backtab>") 'rfcview:read-backward-link)
 
     ;; history navigation across button-driven jumps
+    (define-key map (kbd "B") 'rfcview:read-history-back)
+    (define-key map (kbd "F") 'rfcview:read-history-forward)
     (define-key map (kbd "C-c C-b") 'rfcview:read-history-back)
     (define-key map (kbd "C-c C-f") 'rfcview:read-history-forward)
 
@@ -676,8 +678,8 @@ the index buffer has been killed, just bury the reader."
       (insert "    ] / [       next / previous section\n")
       (insert "    TAB / S-TAB next / previous link (RFC ref, TOC entry, URL)\n")
       (insert "    RET         follow link\n")
-      (insert "    C-c C-b     history back (after following a link)\n")
-      (insert "    C-c C-f     history forward\n\n")
+      (insert "    B / C-c C-b history back (after following a link)\n")
+      (insert "    F / C-c C-f history forward\n\n")
       (insert "  View\n")
       (insert "    + / 0 / -   increase / reset / decrease text scale\n")
       (insert "    o           view original file\n")

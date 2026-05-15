@@ -79,7 +79,8 @@ In an RFC read buffer:
 | =]= / =[=             | Next / previous section heading                                 |
 | =TAB= / =S-TAB=       | Next / previous link (RFC ref, TOC entry, URL)                  |
 | =RET=                 | Follow link under point                                         |
-| =C-c C-b= / =C-c C-f= | History back / forward (after following an RFC or section link) |
+| =B= / =F=             | History back / forward (after following an RFC or section link) |
+| =C-c C-b= / =C-c C-f= | Same, chord form                                                |
 | =n= / =p=             | Next / previous line                                            |
 | =b= / =f=             | Backward / forward char                                         |
 | =+= / =-= / =0=       | Increase / decrease / reset font size                           |
