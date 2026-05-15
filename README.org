@@ -55,37 +55,37 @@ Place all four =.el= files (=rfcview.el=, =rfcview-core.el=, =rfcview-index.el=,
 
 =M-x rfcview= opens the =*RFC INDEX*= buffer.
 
-| Key       | Action                              |
-|-----------+-------------------------------------|
-| =RET= / =SPC= | Open RFC under point            |
-| =n= / =p=     | Next / previous entry           |
-| =TAB= / =S-TAB= | Next / previous button        |
-| =v=           | Toggle favorite                 |
-| =A=           | Show all                        |
-| =F=           | Show favorites                  |
-| =R=           | Show recently read              |
-| =K=           | Keyword search                  |
-| =#=           | Jump to RFC by number           |
-| =f=           | Jump to filter line             |
-| =s=           | Toggle sort order (asc / desc by RFC number; All / Favorites only) |
-| =g=           | Refresh index                   |
-| =?=           | Help                            |
-| =q=           | Bury buffer                     |
+| Key             | Action                                                             |
+|-----------------+--------------------------------------------------------------------|
+| =RET= / =SPC=   | Open RFC under point                                               |
+| =n= / =p=       | Next / previous entry                                              |
+| =TAB= / =S-TAB= | Next / previous button                                             |
+| =v=             | Toggle favorite                                                    |
+| =A=             | Show all                                                           |
+| =F=             | Show favorites                                                     |
+| =R=             | Show recently read                                                 |
+| =K=             | Keyword search                                                     |
+| =#=             | Jump to RFC by number                                              |
+| =f=             | Jump to filter line                                                |
+| =s=             | Toggle sort order (asc / desc by RFC number; All / Favorites only) |
+| =g=             | Refresh index                                                      |
+| =?=             | Help                                                               |
+| =q=             | Bury buffer                                                        |
 
 In an RFC read buffer:
 
-| Key       | Action                              |
-|-----------+-------------------------------------|
-| =]= / =[=       | Next / previous section heading       |
-| =TAB= / =S-TAB= | Next / previous link (RFC ref, TOC entry, URL) |
-| =RET=           | Follow link under point               |
+| Key                   | Action                                                          |
+|-----------------------+-----------------------------------------------------------------|
+| =]= / =[=             | Next / previous section heading                                 |
+| =TAB= / =S-TAB=       | Next / previous link (RFC ref, TOC entry, URL)                  |
+| =RET=                 | Follow link under point                                         |
 | =C-c C-b= / =C-c C-f= | History back / forward (after following an RFC or section link) |
-| =n= / =p=       | Next / previous line                  |
-| =b= / =f=       | Backward / forward char               |
-| =+= / =-= / === / =0= | Increase / decrease / reset font size |
-| =o=             | View raw cached file                  |
-| =?=             | Help                                  |
-| =q=             | Quit (refocus index if visible)       |
+| =n= / =p=             | Next / previous line                                            |
+| =b= / =f=             | Backward / forward char                                         |
+| =+= / =-= / =0=       | Increase / decrease / reset font size                           |
+| =o=                   | View raw cached file                                            |
+| =?=                   | Help                                                            |
+| =q=                   | Quit (refocus index if visible)                                 |
 
 * PDF support
 

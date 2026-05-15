@@ -679,7 +679,7 @@ the index buffer has been killed, just bury the reader."
       (insert "    C-c C-b     history back (after following a link)\n")
       (insert "    C-c C-f     history forward\n\n")
       (insert "  View\n")
-      (insert "    + / = / -   increase / reset / decrease text scale\n")
+      (insert "    + / 0 / -   increase / reset / decrease text scale\n")
       (insert "    o           view original file\n")
       (insert "    q           quit\n")
       (insert "    ?           this help\n"))
