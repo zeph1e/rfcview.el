@@ -1721,6 +1721,44 @@ Link positions: button at 3..10, URL overlay at 17..24, button at 31..38."
       (should (equal (overlay-get ov 'help-echo) "unrelated tooltip"))
       (should (eq (overlay-get ov 'mouse-face) 'highlight)))))
 
+(ert-deftest rfcview:test-init-goto-address-registers-restyle-after-fontify ()
+  "Calling `rfcview:read--init-goto-address' (the production helper used
+by `rfcview:read-mode') must leave the restyle AFTER
+`goto-address-fontify-region' in `jit-lock-functions'.  Regression
+guard: `jit-lock-register' prepends, which would put the restyle
+ahead of goto-address — it would then run on a region with no
+overlays yet and be a silent no-op."
+  (with-temp-buffer
+    (rfcview:read--init-goto-address)
+    (let* ((fns (cl-remove-if-not #'symbolp jit-lock-functions))
+           (ga  (cl-position 'goto-address-fontify-region fns))
+           (rv  (cl-position 'rfcview:read--restyle-goto-address-overlays fns)))
+      (should ga)
+      (should rv)
+      (should (< ga rv)))))
+
+(ert-deftest rfcview:test-init-goto-address-restyles-jit-lock-overlays ()
+  "End-to-end via the production helper: after
+`rfcview:read--init-goto-address' wires up the buffer and jit-lock
+fontifies it, goto-address overlays must end up with our synced
+help-echo and mouse-face.  Direct unit tests on the restyle function
+pass even when the registration is wrong — this exercises the path
+that broke in real read-mode buffers."
+  (with-temp-buffer
+    (insert "Some text http://example.com/foo more text\n")
+    (rfcview:read--init-goto-address)
+    ;; Run jit-lock-functions in registered order, skipping the `t' marker.
+    (dolist (fn jit-lock-functions)
+      (when (functionp fn)
+        (funcall fn (point-min) (point-max))))
+    (let ((ovs (cl-remove-if-not
+                (lambda (ov) (overlay-get ov 'goto-address))
+                (overlays-in (point-min) (point-max)))))
+      (should (= 1 (length ovs)))
+      (let ((ov (car ovs)))
+        (should (equal (overlay-get ov 'help-echo) "mouse-1, RET: follow URL"))
+        (should (eq    (overlay-get ov 'mouse-face) 'rfcview:mouse-face))))))
+
 ;;; ─── rfcview:read-show-help ──────────────────────────────────────────────────
 
 (ert-deftest rfcview:test-read-show-help-keys-match-keymap ()

@@ -633,13 +633,14 @@ Records the current location onto the back stack."
       (rfcview:nav--restore target)
       (message "Forward to RFC %d" (car target)))))
 
-(defun rfcview:read--restyle-goto-address-overlays ()
-  "Sync goto-address URL overlays with rfcview's button styling.
+(defun rfcview:read--restyle-goto-address-overlays (&optional start end)
+  "Sync goto-address overlays in [START, END) with rfcview's button styling.
 `goto-address-mode' hardcodes a help-echo referring to its default bindings
-and uses `highlight' for `mouse-face'.  Replace both on every URL overlay
-in the current buffer so tooltips and hover styling match the rfcview keymap
-and button look."
-  (dolist (ov (overlays-in (point-min) (point-max)))
+and uses `highlight' for `mouse-face'.  Replace both on every URL/mail overlay
+so tooltips and hover styling match the rfcview keymap and button look.
+Registered with `jit-lock' so overlays created lazily as the user scrolls
+are restyled too, not just the ones present at mode-setup time."
+  (dolist (ov (overlays-in (or start (point-min)) (or end (point-max))))
     (when (overlay-get ov 'goto-address)
       (overlay-put ov 'help-echo "mouse-1, RET: follow URL")
       (overlay-put ov 'mouse-face 'rfcview:mouse-face))))
@@ -686,6 +687,29 @@ the index buffer has been killed, just bury the reader."
     (goto-char (point-min)))
   (display-buffer "*RFC Help*"))
 
+(defun rfcview:read--init-goto-address ()
+  "Enable `goto-address-mode' in the current buffer and sync its
+overlay styling with rfcview's buttons.  Restyles overlays already
+present, and appends `rfcview:read--restyle-goto-address-overlays'
+to `jit-lock-functions' so overlays created lazily (as the user
+scrolls into unfontified regions) are restyled too.
+
+The append is critical: `jit-lock-register' would prepend, placing
+the restyle BEFORE `goto-address-fontify-region' — it would then
+run on regions with no overlays yet and be a silent no-op."
+  (goto-address-mode 1)
+  (with-eval-after-load 'goto-addr
+    (make-variable-buffer-local 'goto-address-highlight-keymap)
+    (make-variable-buffer-local 'face-remapping-alist)
+    (setq face-remapping-alist
+          `((link ,(custom-face-attributes-get 'rfcview:button-face nil))))
+    (let ((map goto-address-highlight-keymap))
+      (define-key map (kbd "RET") #'goto-address-at-point)
+      (define-key map (kbd "<mouse-1>")  #'goto-address-at-point)))
+  (rfcview:read--restyle-goto-address-overlays)
+  (add-hook 'jit-lock-functions
+            #'rfcview:read--restyle-goto-address-overlays t t))
+
 (defun rfcview:read-mode (number file)
   "Major mode for reading RFC NUMBER from cached FILE.
 \\{rfcview:read-mode-map}"
@@ -703,18 +727,7 @@ the index buffer has been killed, just bury the reader."
   ;; "RFC NNNN" fragment in the title; refs then skips already-buttoned ranges.
   (rfcview:read-buttonize-toc)
   (rfcview:read-buttonize-refs)
-
-  ;; Load and uniform link button style w/ goto-address-mode
-  (goto-address-mode 1)
-  (with-eval-after-load 'goto-addr
-    (make-variable-buffer-local 'goto-address-highlight-keymap)
-    (make-variable-buffer-local 'face-remapping-alist)
-    (setq face-remapping-alist
-          `((link ,(custom-face-attributes-get 'rfcview:button-face nil))))
-    (let ((map goto-address-highlight-keymap))
-      (define-key map (kbd "RET") #'goto-address-at-point)
-      (define-key map (kbd "<mouse-1>")  #'goto-address-at-point)))
-  (rfcview:read--restyle-goto-address-overlays)
+  (rfcview:read--init-goto-address)
   (run-hooks 'rfcview-read-mode-hook))
 
 (defun rfcview:read-view-original ()
