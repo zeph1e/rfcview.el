@@ -284,6 +284,41 @@ ALL-CAPS, Abstract, etc.)."
       (puthash (rfcview:read--normalize-title heading-line)
                marker rfcview:read-section-anchors-by-title)))))
 
+(defun rfcview:read--cached-authors ()
+  "Return author list for the current RFC from `rfcview:rfc-cache', or nil."
+  (let* ((table (and rfcview:rfc-cache (plist-get rfcview:rfc-cache :table)))
+         (entry (and (hash-table-p table)
+                     (numberp rfcview:read-rfc-number)
+                     (> rfcview:read-rfc-number 0)
+                     (gethash rfcview:read-rfc-number table))))
+    (and entry (plist-get entry :authors))))
+
+(defun rfcview:read--author-regexp (name)
+  "Return a regexp matching NAME (cached form) or a plausible expansion.
+\"J. Doe\" matches \"J. Doe\" and \"John Doe\".  Non-ASCII Latin
+letters (accents, diacritics) are honored via `[[:alpha:]]'.  A
+trailing \", Ed.\" suffix in NAME is preserved in the regexp."
+  (let* ((ed-re ",[ \t]*Ed\\.?")
+         (ed-tail (string-match (concat ed-re "\\'") name))
+         (core (if ed-tail (substring name 0 ed-tail) name))
+         (tokens (split-string (string-trim core) "[ \t]+" t))
+         (surname (car (last tokens)))
+         (initials (butlast tokens)))
+    (concat (mapconcat (lambda (tok)
+                         (concat (regexp-quote (substring tok 0 1))
+                                 "[[:alpha:]]*\\.?"))
+                       initials "[ \t]+")
+            (and initials "[ \t]+")
+            (regexp-quote surname)
+            (and ed-tail (concat "[ \t]*" ed-re)))))
+
+(defun rfcview:read--authors-regexp (authors)
+  "Build a regexp matching any name in AUTHORS, anchored to a full line."
+  (when authors
+    (concat "\\`[ \t]*\\(?:"
+            (mapconcat #'rfcview:read--author-regexp authors "\\|")
+            "\\)[ \t]*\\'")))
+
 (defun rfcview:read-fontify ()
   "Apply faces to RFC header, title, and section headings via text properties.
 Also populates `rfcview:read-section-anchors-by-number' and -by-title with
@@ -292,16 +327,32 @@ markers pointing at each heading, used later by `rfcview:read-buttonize-toc'."
         rfcview:read-section-anchors-by-title  (make-hash-table :test 'equal))
   (with-silent-modifications
     (save-excursion
-      ;; Header block: from start to the first blank line
+      ;; Header block: from start to the first blank line that does not
+      ;; immediately precede a known author line.  RFC 9893 has an internal
+      ;; blank line inside the header because one author appears without an
+      ;; accompanying organization, and the bare "stop at first blank"
+      ;; heuristic would otherwise truncate the header early.
       (goto-char (point-min))
       ;; recent has \ufeff at the very early of document
-      (let ((header-start (if (re-search-forward "^[^\ufeff\n]+$" nil t)
-                              (line-beginning-position)
-                            (point-min)))
-            (header-end (if (re-search-forward "^[ \t]*$" nil t)
-                            (line-beginning-position)
-                          (point-max))))
-        (put-text-property header-start header-end 'face 'rfcview:read-rfc-header-face))
+      (let* ((header-start (if (re-search-forward "^[^\ufeff\n]+$" nil t)
+                               (line-beginning-position)
+                             (point-min)))
+             (author-re (rfcview:read--authors-regexp
+                         (rfcview:read--cached-authors))))
+        (goto-char header-start)
+        (forward-line 1)
+        (while (and (not (eobp))
+                    (or (not (looking-at "^[ \t]*$"))
+                        (and author-re
+                             (save-excursion
+                               (forward-line 1)
+                               (string-match
+                                author-re
+                                (buffer-substring-no-properties
+                                 (line-beginning-position)
+                                 (line-end-position)))))))
+          (forward-line 1))
+        (put-text-property header-start (point) 'face 'rfcview:read-rfc-header-face))
       ;; Title: first block of indented (centered) non-blank lines after the header gap
       (forward-line 1)
       (while (and (not (eobp)) (looking-at "^[ \t]*$"))

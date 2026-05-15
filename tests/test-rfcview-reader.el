@@ -208,6 +208,97 @@ also match — this test documents the case-sensitive-only behavior."
     (should-not (eq 'rfcview:read-rfc-header-face
                     (rfcview-test:face-at-string "A Sample Protocol")))))
 
+(ert-deftest rfcview:test-read-author-regexp-matches-cached-form ()
+  "Cached form (\"J. Doe\") matches itself."
+  (let ((re (rfcview:read--author-regexp "J. Doe")))
+    (should (string-match-p (concat "\\`" re "\\'") "J. Doe"))))
+
+(ert-deftest rfcview:test-read-author-regexp-matches-expanded-given-name ()
+  "Cached initial form matches an expanded given name (\"John Doe\")."
+  (let ((re (rfcview:read--author-regexp "J. Doe")))
+    (should (string-match-p (concat "\\`" re "\\'") "John Doe"))))
+
+(ert-deftest rfcview:test-read-author-regexp-rejects-different-surname ()
+  "Same initial but different surname does not match."
+  (let ((re (rfcview:read--author-regexp "J. Doe")))
+    (should-not (string-match-p (concat "\\`" re "\\'") "John Smith"))))
+
+(ert-deftest rfcview:test-read-author-regexp-rejects-different-initial ()
+  "Same surname but different initial does not match."
+  (let ((re (rfcview:read--author-regexp "J. Doe")))
+    (should-not (string-match-p (concat "\\`" re "\\'") "K. Doe"))))
+
+(ert-deftest rfcview:test-read-author-regexp-non-ascii-latin ()
+  "Non-ASCII Latin letters (accents, diacritics) are honored."
+  (let ((re (rfcview:read--author-regexp "Á. García")))
+    (should (string-match-p (concat "\\`" re "\\'") "Á. García"))
+    (should (string-match-p (concat "\\`" re "\\'") "Álvaro García"))))
+
+(ert-deftest rfcview:test-read-author-regexp-ed-suffix-preserved ()
+  "A trailing \", Ed.\" suffix on the cached name is preserved in the regexp."
+  (let ((re (rfcview:read--author-regexp "E. Kinzie, Ed.")))
+    (should (string-match-p (concat "\\`" re "\\'") "E. Kinzie, Ed."))
+    (should (string-match-p (concat "\\`" re "\\'") "Eric Kinzie, Ed."))
+    (should-not (string-match-p (concat "\\`" re "\\'") "E. Kinzie"))))
+
+(ert-deftest rfcview:test-read-fontify-header-consumes-internal-blank-before-author ()
+  "An internal blank line in the header is consumed when the next line is
+a known author (RFC 9893 style: author appears without an organization
+on the LHS, leaving the line all-whitespace).  Without this, the header
+would be truncated and the author line would be mis-fontified as the
+title."
+  (let ((rfcview:rfc-cache
+         (list :table (let ((h (make-hash-table :test 'equal)))
+                        (puthash 9999
+                                 (list :authors '("J. Author" "K. Other"))
+                                 h)
+                        h))))
+    (with-temp-buffer
+      (setq rfcview:read-rfc-number 9999)
+      (insert "Network Working Group                                   J. Author\n"
+              "Request for Comments: 9999                            Some Corp.\n"
+              "\n"
+              "                                                         K. Other\n"
+              "                                                     January 2026\n"
+              "\n"
+              "\n"
+              "                       A Sample Protocol\n"
+              "\n"
+              "Abstract\n\n   Body.\n")
+      (rfcview:read-fontify)
+      (should (eq 'rfcview:read-rfc-header-face
+                  (rfcview-test:face-at-string "K. Other")))
+      (should (eq 'rfcview:read-rfc-title-face
+                  (rfcview-test:face-at-string "A Sample Protocol"))))))
+
+(ert-deftest rfcview:test-read-fontify-header-author-name-expanded-in-doc ()
+  "When the document uses an expanded given name (\"John Doe\") but the
+cache stores the initial form (\"J. Doe\"), the author-line peek after
+an internal blank still matches and the header is preserved."
+  (let ((rfcview:rfc-cache
+         (list :table (let ((h (make-hash-table :test 'equal)))
+                        (puthash 9999
+                                 (list :authors '("J. Author" "J. Doe"))
+                                 h)
+                        h))))
+    (with-temp-buffer
+      (setq rfcview:read-rfc-number 9999)
+      (insert "Network Working Group                                   J. Author\n"
+              "Request for Comments: 9999                            Some Corp.\n"
+              "\n"
+              "                                                         John Doe\n"
+              "                                                     January 2026\n"
+              "\n"
+              "\n"
+              "                       A Sample Protocol\n"
+              "\n"
+              "Abstract\n\n   Body.\n")
+      (rfcview:read-fontify)
+      (should (eq 'rfcview:read-rfc-header-face
+                  (rfcview-test:face-at-string "John Doe")))
+      (should (eq 'rfcview:read-rfc-title-face
+                  (rfcview-test:face-at-string "A Sample Protocol"))))))
+
 (ert-deftest rfcview:test-read-fontify-title-gets-title-face ()
   "Space-indented lines after the header gap get rfcview:read-rfc-title-face."
   (with-temp-buffer
