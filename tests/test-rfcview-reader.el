@@ -1369,6 +1369,157 @@ that regex fails to match a line that contains only \\r (from CRLF)."
       (rfcview:read-rfc 8)
       (should-not downloaded))))
 
+;;; ─── rfcview:nav-history ────────────────────────────────────────────────────
+
+(defmacro rfcview:test--with-fake-reader (rfc-num pos &rest body)
+  "Run BODY in a fake reader buffer pretending to be RFC RFC-NUM with point at POS.
+Resets the global navigation history before BODY and cleans up the buffer after."
+  (declare (indent 2))
+  `(let ((buf (generate-new-buffer (format "*RFC %04d*" ,rfc-num))))
+     (rfcview:nav-history-clear)
+     (unwind-protect
+         (with-current-buffer buf
+           (insert (make-string 200 ?x))
+           (setq-local rfcview:read-rfc-number ,rfc-num)
+           (goto-char ,pos)
+           ,@body)
+       (kill-buffer buf))))
+
+(ert-deftest rfcview:test-nav-push-records-current-location ()
+  "nav-push pushes (RFC . POS) onto BACK and clears FORWARD."
+  (rfcview:test--with-fake-reader 100 42
+    (setcdr rfcview:nav-history '((999 . 1)))  ; stale forward
+    (rfcview:nav-push)
+    (should (equal (car rfcview:nav-history) '((100 . 42))))
+    (should-not (cdr rfcview:nav-history))))
+
+(ert-deftest rfcview:test-nav-push-deduplicates-adjacent ()
+  "Pushing the same record twice in a row keeps only one entry."
+  (rfcview:test--with-fake-reader 100 42
+    (rfcview:nav-push)
+    (rfcview:nav-push)
+    (should (equal (car rfcview:nav-history) '((100 . 42))))))
+
+(ert-deftest rfcview:test-nav-push-respects-history-max ()
+  "BACK stack length is capped by rfcview:nav-history-max."
+  (rfcview:test--with-fake-reader 100 1
+    (let ((rfcview:nav-history-max 3))
+      (dolist (p '(10 20 30 40 50))
+        (goto-char p)
+        (rfcview:nav-push))
+      (should (= (length (car rfcview:nav-history)) 3))
+      ;; newest first; oldest two (10, 20) dropped
+      (should (equal (car rfcview:nav-history)
+                     '((100 . 50) (100 . 40) (100 . 30)))))))
+
+(ert-deftest rfcview:test-nav-push-skipped-without-rfc-number ()
+  "nav-push is a no-op when the buffer has no valid RFC number."
+  (rfcview:nav-history-clear)
+  (with-temp-buffer
+    (setq-local rfcview:read-rfc-number 0)
+    (rfcview:nav-push)
+    (should-not (car rfcview:nav-history))))
+
+(ert-deftest rfcview:test-history-clear-resets-both-stacks ()
+  "nav-history-clear empties BACK and FORWARD."
+  (setq rfcview:nav-history (cons '((1 . 1) (2 . 2)) '((3 . 3))))
+  (rfcview:nav-history-clear)
+  (should-not (car rfcview:nav-history))
+  (should-not (cdr rfcview:nav-history)))
+
+(ert-deftest rfcview:test-history-back-restores-same-rfc-position ()
+  "C-c C-b on a single-RFC history pops BACK and pushes current to FORWARD."
+  (rfcview:test--with-fake-reader 100 42
+    (rfcview:nav-push)
+    (goto-char 99)
+    (rfcview:read-history-back)
+    (should (= (point) 42))
+    (should-not (car rfcview:nav-history))
+    (should (equal (cdr rfcview:nav-history) '((100 . 99))))))
+
+(ert-deftest rfcview:test-history-back-errors-on-empty ()
+  "C-c C-b with empty BACK signals user-error."
+  (rfcview:test--with-fake-reader 100 1
+    (should-error (rfcview:read-history-back) :type 'user-error)))
+
+(ert-deftest rfcview:test-history-forward-errors-on-empty ()
+  "C-c C-f with empty FORWARD signals user-error."
+  (rfcview:test--with-fake-reader 100 1
+    (should-error (rfcview:read-history-forward) :type 'user-error)))
+
+(ert-deftest rfcview:test-history-forward-undoes-back ()
+  "After back+forward, point and stacks return to the original state."
+  (rfcview:test--with-fake-reader 100 42
+    (rfcview:nav-push)
+    (goto-char 99)
+    (rfcview:read-history-back)
+    (should (= (point) 42))
+    (rfcview:read-history-forward)
+    (should (= (point) 99))
+    (should (equal (car rfcview:nav-history) '((100 . 42))))
+    (should-not (cdr rfcview:nav-history))))
+
+(ert-deftest rfcview:test-nav-push-clears-forward-after-back ()
+  "Making a new jump after going back discards the FORWARD branch."
+  (rfcview:test--with-fake-reader 100 42
+    (rfcview:nav-push)
+    (goto-char 99)
+    (rfcview:read-history-back)
+    (should (cdr rfcview:nav-history))
+    (goto-char 50)
+    (rfcview:nav-push)
+    (should-not (cdr rfcview:nav-history))))
+
+(ert-deftest rfcview:test-history-back-switches-to-other-rfc-buffer ()
+  "C-c C-b across RFCs switches to the source buffer and restores position."
+  (let ((buf-a (generate-new-buffer "*RFC 0100*"))
+        (buf-b (generate-new-buffer "*RFC 0200*")))
+    (rfcview:nav-history-clear)
+    (unwind-protect
+        (progn
+          (with-current-buffer buf-a
+            (insert (make-string 200 ?a))
+            (setq-local rfcview:read-rfc-number 100))
+          (with-current-buffer buf-b
+            (insert (make-string 200 ?b))
+            (setq-local rfcview:read-rfc-number 200))
+          ;; Simulate: jumped from A@42 to B, currently at B@99.
+          (setq rfcview:nav-history (cons '((100 . 42)) nil))
+          (set-buffer buf-b)
+          (goto-char 99)
+          (rfcview:read-history-back)
+          (should (eq (current-buffer) buf-a))
+          (should (= (point) 42))
+          (should-not (car rfcview:nav-history))
+          (should (equal (cdr rfcview:nav-history) '((200 . 99)))))
+      (kill-buffer buf-a)
+      (kill-buffer buf-b))))
+
+(ert-deftest rfcview:test-jump-to-another-rfc-after-back-clears-forward ()
+  "After back, jumping (push) to a new location discards the forward branch."
+  (let ((buf-a (generate-new-buffer "*RFC 0100*"))
+        (buf-b (generate-new-buffer "*RFC 0200*")))
+    (rfcview:nav-history-clear)
+    (unwind-protect
+        (progn
+          (with-current-buffer buf-a
+            (insert (make-string 200 ?a))
+            (setq-local rfcview:read-rfc-number 100))
+          (with-current-buffer buf-b
+            (insert (make-string 200 ?b))
+            (setq-local rfcview:read-rfc-number 200))
+          (setq rfcview:nav-history (cons '((100 . 42)) nil))
+          (set-buffer buf-b)
+          (goto-char 99)
+          (rfcview:read-history-back)            ; now in A@42; forward = ((200 . 99))
+          (should (cdr rfcview:nav-history))
+          ;; User clicks a link from A@42 to some new place; nav-push records A@42.
+          (rfcview:nav-push)
+          (should-not (cdr rfcview:nav-history))
+          (should (equal (car rfcview:nav-history) '((100 . 42)))))
+      (kill-buffer buf-a)
+      (kill-buffer buf-b))))
+
 ;;; ─── rfcview:read-forward-link / rfcview:read-backward-link ─────────────────
 
 (defun rfcview:test--make-link-buffer ()
@@ -1462,6 +1613,39 @@ Link positions: button at 3..10, URL overlay at 17..24, button at 31..38."
           (rfcview:read-forward-link 0)
           (should (= (point) 13)))
       (kill-buffer buf))))
+
+;;; ─── rfcview:read--restyle-goto-address-overlays ────────────────────────────
+
+(ert-deftest rfcview:test-restyle-goto-address-overrides-help-echo ()
+  "URL overlays get their stock help-echo replaced with our bindings."
+  (with-temp-buffer
+    (insert "https://example.com")
+    (let ((ov (make-overlay 1 20)))
+      (overlay-put ov 'goto-address t)
+      (overlay-put ov 'help-echo "mouse-2, C-c RET: follow URL")
+      (rfcview:read--restyle-goto-address-overlays)
+      (should (equal (overlay-get ov 'help-echo) "mouse-1, RET: follow URL")))))
+
+(ert-deftest rfcview:test-restyle-goto-address-syncs-mouse-face ()
+  "URL overlays get `rfcview:mouse-face' instead of `highlight'."
+  (with-temp-buffer
+    (insert "https://example.com")
+    (let ((ov (make-overlay 1 20)))
+      (overlay-put ov 'goto-address t)
+      (overlay-put ov 'mouse-face 'highlight)
+      (rfcview:read--restyle-goto-address-overlays)
+      (should (eq (overlay-get ov 'mouse-face) 'rfcview:mouse-face)))))
+
+(ert-deftest rfcview:test-restyle-goto-address-ignores-non-url-overlays ()
+  "Overlays without a goto-address property are left alone."
+  (with-temp-buffer
+    (insert "some text")
+    (let ((ov (make-overlay 1 5)))
+      (overlay-put ov 'help-echo "unrelated tooltip")
+      (overlay-put ov 'mouse-face 'highlight)
+      (rfcview:read--restyle-goto-address-overlays)
+      (should (equal (overlay-get ov 'help-echo) "unrelated tooltip"))
+      (should (eq (overlay-get ov 'mouse-face) 'highlight)))))
 
 ;;; ─── rfcview:read-show-help ──────────────────────────────────────────────────
 

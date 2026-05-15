@@ -14,9 +14,12 @@
 - Browse the full up-to-date IETF RFC index with fancy and informative look.
 - Filter by favorites, recently read, or keyword search (scored and ranked)
 - Automatically download and display RFCs on demand.
+- PDF fallback when the plain-text edition is unavailable (requires pdf-tools)
 - Rich read mode:
   - Applying style to RFC document
   - Jump by section
+  - Clickable TOC entries, RFC cross-references, and URLs
+  - History back / forward across followed links
   - Seamless page breaks; looks like one continuous page
 
 
@@ -76,6 +79,7 @@ In an RFC read buffer:
 | =]= / =[=       | Next / previous section heading       |
 | =TAB= / =S-TAB= | Next / previous link (RFC ref, TOC entry, URL) |
 | =RET=           | Follow link under point               |
+| =C-c C-b= / =C-c C-f= | History back / forward (after following an RFC or section link) |
 | =n= / =p=       | Next / previous line                  |
 | =b= / =f=       | Backward / forward char               |
 | =+= / =-= / === / =0= | Increase / decrease / reset font size |

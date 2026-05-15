@@ -132,6 +132,10 @@ list items like \"3.  Foo, bar.\" are still rejected.")
     (define-key map (kbd "<tab>") 'rfcview:read-forward-link)
     (define-key map (kbd "<backtab>") 'rfcview:read-backward-link)
 
+    ;; history navigation across button-driven jumps
+    (define-key map (kbd "C-c C-b") 'rfcview:read-history-back)
+    (define-key map (kbd "C-c C-f") 'rfcview:read-history-forward)
+
     ;; font scale
     (define-key map (kbd "0") 'text-scale-adjust)
     (define-key map (kbd "-") 'text-scale-adjust)
@@ -387,6 +391,7 @@ has already wrapped in a `rfcview:section-link-button'."
                        'type 'rfcview:rfc-link-button
                        'number num
                        'action (lambda (btn)
+                                 (rfcview:nav-push)
                                  (rfcview:read-rfc (button-get btn 'number)))
                        'help-echo (when rfc (plist-get rfc :title))))))))
 
@@ -398,6 +403,7 @@ has already wrapped in a `rfcview:section-link-button'."
                'action (lambda (btn)
                          (let ((m (button-get btn 'target)))
                            (when (markerp m)
+                             (rfcview:nav-push)
                              (goto-char m)
                              (when (eq (window-buffer) (current-buffer))
                                (recenter 0)))))
@@ -529,6 +535,87 @@ or if the anchor tables are empty."
         (overlay-put ov 'invisible t)
         (overlay-put ov 'evaporate t)))))
 
+(defun rfcview:nav-push ()
+  "Push the current reader location onto the BACK stack and clear FORWARD.
+Called by button actions just before they leave the current location."
+  (when (and (numberp rfcview:read-rfc-number)
+             (> rfcview:read-rfc-number 0))
+    (let* ((rec (cons rfcview:read-rfc-number (point)))
+           (back (car rfcview:nav-history))
+           (new-back (if (equal rec (car back)) back (cons rec back))))
+      (when (> (length new-back) rfcview:nav-history-max)
+        (setq new-back (butlast new-back)))
+      (setq rfcview:nav-history (cons new-back nil)))))
+
+(defun rfcview:nav--restore (rec)
+  "Restore navigation record REC: (RFC-NUMBER . POSITION).
+Four cases by target buffer status:
+- Already in the current buffer: just `goto-char'.
+- Visible in another window of this frame: `select-window' it.
+- Buffer exists but no window: `switch-to-buffer' in the current window.
+- Buffer was killed: re-open via `rfcview:read-rfc' (uses local cache)."
+  (let* ((num (car rec))
+         (pos (cdr rec))
+         (buf-name (format "*RFC %04d*" num))
+         (buf (get-buffer buf-name))
+         (win (and buf (get-buffer-window buf))))
+    (cond
+     ((and buf (eq buf (current-buffer)))
+      (goto-char pos))
+     (win
+      (select-window win)
+      (goto-char pos))
+     (buf
+      (switch-to-buffer buf)
+      (goto-char pos))
+     (t
+      (rfcview:read-rfc num)
+      (goto-char pos)))
+    (when (eq (window-buffer) (current-buffer))
+      (recenter))))
+
+(defun rfcview:read-history-back ()
+  "Go back to the previous reader location.
+Records the current location onto the forward stack."
+  (interactive)
+  (let ((back (car rfcview:nav-history))
+        (forward (cdr rfcview:nav-history)))
+    (unless back (user-error "No earlier location"))
+    (let* ((target (car back))
+           (cur (cons rfcview:read-rfc-number (point)))
+           (new-back (cdr back))
+           (new-forward (if (equal cur (car forward)) forward
+                          (cons cur forward))))
+      (setq rfcview:nav-history (cons new-back new-forward))
+      (rfcview:nav--restore target)
+      (message "Back to RFC %d" (car target)))))
+
+(defun rfcview:read-history-forward ()
+  "Go forward to the next reader location.
+Records the current location onto the back stack."
+  (interactive)
+  (let ((back (car rfcview:nav-history))
+        (forward (cdr rfcview:nav-history)))
+    (unless forward (user-error "No later location"))
+    (let* ((target (car forward))
+           (cur (cons rfcview:read-rfc-number (point)))
+           (new-back (if (equal cur (car back)) back (cons cur back)))
+           (new-forward (cdr forward)))
+      (setq rfcview:nav-history (cons new-back new-forward))
+      (rfcview:nav--restore target)
+      (message "Forward to RFC %d" (car target)))))
+
+(defun rfcview:read--restyle-goto-address-overlays ()
+  "Sync goto-address URL overlays with rfcview's button styling.
+`goto-address-mode' hardcodes a help-echo referring to its default bindings
+and uses `highlight' for `mouse-face'.  Replace both on every URL overlay
+in the current buffer so tooltips and hover styling match the rfcview keymap
+and button look."
+  (dolist (ov (overlays-in (point-min) (point-max)))
+    (when (overlay-get ov 'goto-address)
+      (overlay-put ov 'help-echo "mouse-1, RET: follow URL")
+      (overlay-put ov 'mouse-face 'rfcview:mouse-face))))
+
 (defun rfcview:read-quit ()
   "Bury the RFC reader buffer and return to the RFC index.
 If the `*RFC INDEX*' window is visible, select it.  Otherwise, if
@@ -559,7 +646,9 @@ the index buffer has been killed, just bury the reader."
       (insert "    b / f       backward / forward char\n")
       (insert "    ] / [       next / previous section\n")
       (insert "    TAB / S-TAB next / previous link (RFC ref, TOC entry, URL)\n")
-      (insert "    RET         follow link\n\n")
+      (insert "    RET         follow link\n")
+      (insert "    C-c C-b     history back (after following a link)\n")
+      (insert "    C-c C-f     history forward\n\n")
       (insert "  View\n")
       (insert "    + / = / -   increase / reset / decrease text scale\n")
       (insert "    o           view original file\n")
@@ -597,6 +686,7 @@ the index buffer has been killed, just bury the reader."
     (let ((map goto-address-highlight-keymap))
       (define-key map (kbd "RET") #'goto-address-at-point)
       (define-key map (kbd "<mouse-1>")  #'goto-address-at-point)))
+  (rfcview:read--restyle-goto-address-overlays)
   (run-hooks 'rfcview-read-mode-hook))
 
 (defun rfcview:read-view-original ()

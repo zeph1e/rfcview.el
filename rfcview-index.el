@@ -571,6 +571,7 @@ create the cache from scratch."
         (setq recent (remove (last recent) recent)))
     (push number recent)
     (plist-put rfcview:rfc-cache :recent recent)
+    (rfcview:nav-history-clear)
     (rfcview:read-rfc number)))
 
 (defun rfcview:index-toggle-favorite ()

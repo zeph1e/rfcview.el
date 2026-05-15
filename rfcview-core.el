@@ -75,6 +75,21 @@ chronological order; Keywords preserves relevance-score order."
   :type 'boolean
   :group 'rfcview)
 
+(defcustom rfcview:nav-history-max 100
+  "Maximum number of entries kept in the reader navigation history."
+  :type 'integer
+  :group 'rfcview)
+
+(defvar rfcview:nav-history (cons nil nil)
+  "Reader navigation history as a cons cell (BACK . FORWARD).
+BACK is a stack of past (RFC-NUMBER . POSITION) records (newest first);
+FORWARD is a stack of forward-traversed records.  Cleared whenever an
+RFC is opened from the index buffer.")
+
+(defun rfcview:nav-history-clear ()
+  "Reset the reader navigation history."
+  (setq rfcview:nav-history (cons nil nil)))
+
 (defface rfcview:rfc-number-face
   '((((class color) (min-colors 88) (background dark))
      (:foreground "gold"))
