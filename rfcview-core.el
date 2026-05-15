@@ -170,7 +170,7 @@ RFC is opened from the index buffer.")
 
 (defface rfcview:button-face
   '((((class color) (background dark))
-     (:foreground "cyan" :underline t))
+     (:foreground "dark turquoise" :underline t))
     (((class color) (background light))
      (:foreground "darkcyan" :underline t))
     (t (:bold t)))
