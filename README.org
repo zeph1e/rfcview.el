@@ -79,6 +79,7 @@ In an RFC read buffer:
 | Key                   | Action                                                          |
 |-----------------------+-----------------------------------------------------------------|
 | =]= / =[=             | Next / previous section heading                                 |
+| =j=                   | Jump to section by number or title                              |
 | =TAB= / =S-TAB=       | Next / previous link (RFC ref, TOC entry, URL)                  |
 | =RET=                 | Follow link under point                                         |
 | =B= / =F=             | History back / forward (after following an RFC or section link) |

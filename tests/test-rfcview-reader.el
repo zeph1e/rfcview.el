@@ -1397,6 +1397,56 @@ matches via the `[A-Z(\"]' title-start class."
               (kill-buffer buf))))
       (delete-file tmp))))
 
+(ert-deftest rfcview:test-open-rfc-txt-jumps-to-section ()
+  "open-rfc-txt moves point to SECTION when one is given."
+  (let ((tmp (make-temp-file "rfcview-test-" nil ".txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp (insert (rfcview-test:sample-rfc-with-toc)))
+          (let ((rfcview:nav-history (cons nil nil))
+                (buf (rfcview:open-rfc-txt 6 tmp "2")))
+            (unwind-protect
+                (with-current-buffer buf
+                  (should (looking-at "2\\.  Protocol Details")))
+              (kill-buffer buf))))
+      (delete-file tmp))))
+
+(ert-deftest rfcview:test-open-rfc-txt-section-jump-does-not-push-history ()
+  "Opening a buffer via section-button click must not push the new
+buffer's position 1 onto the BACK stack — only the origin pushed by
+the button action should be there.  Otherwise `B' would need two
+presses to leave RFC 6 and return to the originating buffer."
+  (let ((tmp (make-temp-file "rfcview-test-" nil ".txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp (insert (rfcview-test:sample-rfc-with-toc)))
+          ;; Simulate the section button having already pushed the origin.
+          (let* ((origin '(9999 . 42))
+                 (rfcview:nav-history (cons (list origin) nil))
+                 (buf (rfcview:open-rfc-txt 7 tmp "2")))
+            (unwind-protect
+                (progn
+                  (should (equal (car rfcview:nav-history) (list origin)))
+                  (with-current-buffer buf
+                    (should (looking-at "2\\.  Protocol Details"))))
+              (kill-buffer buf))))
+      (delete-file tmp))))
+
+(ert-deftest rfcview:test-open-rfc-txt-no-section-leaves-point-at-start ()
+  "When SECTION is nil, open-rfc-txt leaves point at buffer start."
+  (let ((tmp (make-temp-file "rfcview-test-" nil ".txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp (insert (rfcview-test:sample-rfc-with-toc)))
+          (let ((rfcview:nav-history (cons nil nil))
+                (buf (rfcview:open-rfc-txt 8 tmp)))
+            (unwind-protect
+                (with-current-buffer buf
+                  (should (= (point) (point-min)))
+                  (should (null (car rfcview:nav-history))))
+              (kill-buffer buf))))
+      (delete-file tmp))))
+
 ;;; ─── rfcview:open-rfc-pdf ────────────────────────────────────────────────────
 
 (ert-deftest rfcview:test-open-rfc-pdf-errors-without-pdf-tools ()
@@ -1501,7 +1551,7 @@ that regex fails to match a line that contains only \\r (from CRLF)."
               ((symbol-function 'rfcview:download-rfc)
                (lambda (_number fmt file) (if (eq fmt 'pdf) file nil)))
               ((symbol-function 'rfcview:open-rfc-pdf)
-               (lambda (_number _file) (setq opened-fmt 'pdf) (current-buffer)))
+               (lambda (_number _file &optional _section) (setq opened-fmt 'pdf) (current-buffer)))
               ((symbol-function 'pop-to-buffer) #'ignore))
       (rfcview:read-rfc 8)
       (should (eq opened-fmt 'pdf)))))
@@ -1516,7 +1566,7 @@ that regex fails to match a line that contains only \\r (from CRLF)."
               ((symbol-function 'rfcview:download-rfc)
                (lambda (_number fmt file) (if (eq fmt 'txt) file nil)))
               ((symbol-function 'rfcview:open-rfc-txt)
-               (lambda (_number _file) (setq opened-fmt 'txt) (current-buffer)))
+               (lambda (_number _file &optional _section) (setq opened-fmt 'txt) (current-buffer)))
               ((symbol-function 'pop-to-buffer) #'ignore))
       (rfcview:read-rfc 793)
       (should (eq opened-fmt 'txt)))))
@@ -1532,7 +1582,7 @@ that regex fails to match a line that contains only \\r (from CRLF)."
               ((symbol-function 'rfcview:download-rfc)
                (lambda (&rest _) (setq downloaded t) nil))
               ((symbol-function 'rfcview:open-rfc-pdf)
-               (lambda (_number _file) (current-buffer)))
+               (lambda (_number _file &optional _section) (current-buffer)))
               ((symbol-function 'pop-to-buffer) #'ignore))
       (rfcview:read-rfc 8)
       (should-not downloaded))))
@@ -1971,6 +2021,111 @@ that broke in real read-mode buffers."
 (ert-deftest rfcview:test-read-format-order-unsupported-tokens-filtered ()
   "Tokens outside `rfcview:supported-formats' (PS, EPUB, …) are dropped."
   (should (equal '(txt) (rfcview:read--format-order 'txt '("TXT" "PS" "EPUB")))))
+
+;;; ─── rfcview:read-jump-to-section ───────────────────────────────────────────
+
+(ert-deftest rfcview:test-read-jump-to-section-by-number ()
+  "Jumping by a numeric key lands on the matching heading line."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (let ((rfcview:nav-history (cons nil nil)))
+      (goto-char (point-min))
+      (rfcview:read-jump-to-section "1.1")
+      (should (looking-at "1\\.1  Goals")))))
+
+(ert-deftest rfcview:test-read-jump-to-section-number-trailing-dot ()
+  "A trailing dot on the section number is normalized away."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (let ((rfcview:nav-history (cons nil nil)))
+      (goto-char (point-min))
+      (rfcview:read-jump-to-section "2.")
+      (should (looking-at "2\\.  Protocol Details")))))
+
+(ert-deftest rfcview:test-read-jump-to-section-by-title ()
+  "When the input does not match by number, fall back to title lookup."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (let ((rfcview:nav-history (cons nil nil)))
+      (goto-char (point-min))
+      (rfcview:read-jump-to-section "Acknowledgements")
+      (should (looking-at "Acknowledgements")))))
+
+(ert-deftest rfcview:test-read-jump-to-section-title-case-insensitive ()
+  "Title lookup is case- and whitespace-insensitive (normalize-title)."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (let ((rfcview:nav-history (cons nil nil)))
+      (goto-char (point-min))
+      (rfcview:read-jump-to-section "  ACKNOWLEDGEMENTS  ")
+      (should (looking-at "Acknowledgements")))))
+
+(ert-deftest rfcview:test-read-jump-to-section-nil-is-noop ()
+  "Nil input does not move point and does not push nav history."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (setq rfcview:read-rfc-number 9999)
+    (let ((rfcview:nav-history (cons nil nil)))
+      (goto-char (point-min))
+      (rfcview:read-jump-to-section nil)
+      (should (= (point) (point-min)))
+      (should (null (car rfcview:nav-history))))))
+
+(ert-deftest rfcview:test-read-jump-to-section-blank-is-noop ()
+  "Whitespace-only input does not move point."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (let ((rfcview:nav-history (cons nil nil)))
+      (goto-char (point-min))
+      (rfcview:read-jump-to-section "   ")
+      (should (= (point) (point-min))))))
+
+(ert-deftest rfcview:test-read-jump-to-section-miss-keeps-point ()
+  "Unknown section keeps point and does not push nav history."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (setq rfcview:read-rfc-number 9999)
+    (let ((rfcview:nav-history (cons nil nil)))
+      (goto-char (point-min))
+      (rfcview:read-jump-to-section "42.7")
+      (should (= (point) (point-min)))
+      (should (null (car rfcview:nav-history))))))
+
+(ert-deftest rfcview:test-read-jump-to-section-pushes-nav ()
+  "Successful jump pushes the prior location onto the BACK stack."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (setq rfcview:read-rfc-number 9999)
+    (let ((rfcview:nav-history (cons nil nil)))
+      (goto-char (point-min))
+      (let ((origin (point)))
+        (rfcview:read-jump-to-section "2")
+        (should (looking-at "2\\.  Protocol Details"))
+        (should (equal (car (car rfcview:nav-history))
+                       (cons 9999 origin)))))))
+
+(ert-deftest rfcview:test-read-jump-to-section-inhibit-nav-push ()
+  "INHIBIT-NAV-PUSH suppresses the history push but still moves point.
+This is the path used by `rfcview:open-rfc-txt' so a section-button
+click does not stack the new buffer's position-1 on top of the origin
+already pushed by the button action."
+  (with-temp-buffer
+    (insert (rfcview-test:sample-rfc-with-toc))
+    (rfcview:read-fontify)
+    (setq rfcview:read-rfc-number 9999)
+    (let ((rfcview:nav-history (cons nil nil)))
+      (goto-char (point-min))
+      (rfcview:read-jump-to-section "2" t)
+      (should (looking-at "2\\.  Protocol Details"))
+      (should (null (car rfcview:nav-history))))))
 
 (provide 'test-rfcview-reader)
 ;;; test-rfcview-reader.el ends here

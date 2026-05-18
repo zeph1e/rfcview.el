@@ -124,9 +124,10 @@ handed to `browse-url' and not cached locally.")
 (defconst rfcview:open-rfc-functions '((txt . rfcview:open-rfc-txt)
                                        (pdf . rfcview:open-rfc-pdf))
   "Alist mapping a format symbol from `rfcview:supported-formats' to
-its open function.  Each handler is called with (NUMBER FILE) — the
-RFC number and a locally-cached file path — and must return the
-opened buffer (or nil if unavailable).
+its open function.  Each handler is called with (NUMBER FILE
+&optional SECTION) — the RFC number, a locally-cached file path, and
+an optional section key (number or title) to jump to — and must
+return the opened buffer (or nil if unavailable).
 
 To wire a new locally-cached format, add an (FMT . FN) entry here and
 add FMT to `rfcview:supported-formats'.  Formats listed in
@@ -145,6 +146,7 @@ it locally.")
     ;; section navigation
     (define-key map (kbd "]") 'rfcview:read-next-section)
     (define-key map (kbd "[") 'rfcview:read-prev-section)
+    (define-key map (kbd "j") 'rfcview:read-jump-to-section)
 
     ;; link navigation (buttons + goto-address URL overlays)
     (define-key map (kbd "<tab>") 'rfcview:read-forward-link)
@@ -191,6 +193,36 @@ it locally.")
         (forward-line 1)
       (goto-char orig)
       (message "No previous section"))))
+
+(defun rfcview:read-jump-to-section (section &optional inhibit-nav-push)
+  "Jump to SECTION in the current RFC reader buffer.
+SECTION is a string — a section number (\"3.1\", \"A.1\", \"A\") or a
+section title (\"Acknowledgements\").  Looks up
+`rfcview:read-section-anchors-by-number' first, then falls back to
+`rfcview:read-section-anchors-by-title'.  Pushes the current location
+onto the history stack before jumping so `B' returns here, unless
+INHIBIT-NAV-PUSH is non-nil — used by `rfcview:open-rfc-txt' when
+opening a fresh buffer, where the caller has already pushed the origin
+and pushing position 1 of the new buffer would stack the history
+twice.  Does nothing when SECTION is nil or blank; messages when no
+matching anchor is found.  When called interactively, prompts for
+SECTION."
+  (interactive "sSection to jump: ")
+  (when (and (stringp section) (> (length (string-trim section)) 0))
+    (let ((target
+           (or (and (hash-table-p rfcview:read-section-anchors-by-number)
+                    (gethash (rfcview:read--normalize-number section)
+                             rfcview:read-section-anchors-by-number))
+               (and (hash-table-p rfcview:read-section-anchors-by-title)
+                    (gethash (rfcview:read--normalize-title section)
+                             rfcview:read-section-anchors-by-title)))))
+      (if (markerp target)
+          (progn
+            (unless inhibit-nav-push (rfcview:nav-push))
+            (goto-char target)
+            (when (eq (window-buffer) (current-buffer))
+              (recenter 0)))
+        (message "Section %s not found" section)))))
 
 (defun rfcview:read--next-goto-address (pos)
   "Position of the next `goto-address' overlay strictly after POS, or nil."
@@ -464,7 +496,22 @@ has already wrapped in a `rfcview:section-link-button'."
                        'action (lambda (btn)
                                  (rfcview:nav-push)
                                  (rfcview:read-rfc (button-get btn 'number)))
-                       'help-echo (when rfc (plist-get rfc :title))))))))
+                       'help-echo (format "RFC %d : %s" num
+                                          (when rfc (plist-get rfc :title))))
+          (save-excursion
+            (when (re-search-backward
+                   "\\(section \\)\\([0-9A-Z]+\\) of \\[?RFC ?[0-9]+\\]?" nil t)
+              (let* ((section (match-string 2)))
+                (make-button (match-beginning 1) (match-end 2)
+                             'type 'rfcview:rfc-link-button
+                             'number num
+                             'section section
+                             'action (lambda (btn)
+                                 (rfcview:nav-push)
+                                 (rfcview:read-rfc (button-get btn 'number)
+                                                   (button-get btn 'section)))
+                             'help-echo (format "Jump to Section %s of RFC %d"
+                                                section num))))))))))
 
 (defun rfcview:read--make-section-button (beg end target)
   "Wrap [BEG, END) in a section-link button that jumps to marker TARGET."
@@ -743,6 +790,7 @@ the index buffer has been killed, just bury the reader."
       (insert "    n / p       next / previous line\n")
       (insert "    b / f       backward / forward char\n")
       (insert "    ] / [       next / previous section\n")
+      (insert "    j           jump to section by number or title\n")
       (insert "    TAB / S-TAB next / previous link (RFC ref, TOC entry, URL)\n")
       (insert "    RET         follow link\n")
       (insert "    B / C-c C-b history back (after following a link)\n")
@@ -808,16 +856,17 @@ run on regions with no overlays yet and be a silent no-op."
     (with-current-buffer buf (text-mode) (read-only-mode))
     (pop-to-buffer buf)))
 
-(defun rfcview:open-rfc-txt (number file)
+(defun rfcview:open-rfc-txt (number file &optional section)
   "Open locally cached txt FILE as RFC NUMBER and return the buffer."
   (let ((buffer (get-buffer-create (format "*RFC %04d*" number))))
     (with-current-buffer buffer
       (insert-file-contents file)
       (set-buffer-modified-p nil)
-      (rfcview:read-mode number file))
+      (rfcview:read-mode number file)
+      (rfcview:read-jump-to-section section t))
     buffer))
 
-(defun rfcview:open-rfc-pdf (number file)
+(defun rfcview:open-rfc-pdf (number file &optional _section)
   "Open locally cached PDF FILE as RFC NUMBER in pdf-view-mode and return the buffer.
 Signals an error if pdf-tools is not installed."
   (unless (fboundp 'pdf-view-mode)
@@ -832,8 +881,8 @@ Signals an error if pdf-tools is not installed."
                        b))))
     buffer))
 
-(defun rfcview:open-rfc-fallback (number fmt)
-  "Open RFC NUMBER as FMT in the user's browser via `browse-url'.
+(defun rfcview:open-rfc-fallback (number fmt &optional _section)
+  "Open RFC NUMBER as FMT in the user's browser vina `browse-url'.
 Used for formats not rendered in Emacs (html, xml).  The document is
 not cached locally."
   (browse-url (format "%srfc%d.%s"
@@ -873,7 +922,7 @@ is listed, returns nil — the caller treats that as \"unavailable\"."
                     (mapcar (lambda (s) (intern (downcase s)))
                             available)))
 
-(defun rfcview:read-rfc (number)
+(defun rfcview:read-rfc (number &optional section)
   "Open RFC NUMBER in the preferred format and pop to its buffer.
 Format selection follows `rfcview:read--format-order' against the
 cached `:format' for NUMBER, so only formats the rfc-index advertises
@@ -894,7 +943,7 @@ hand-off."
                 (dolist (fmt formats)
                   (let ((fn (cdr (assq fmt rfcview:open-rfc-functions))))
                     (unless fn
-                      (rfcview:open-rfc-fallback number fmt)
+                      (rfcview:open-rfc-fallback number fmt section)
                       (throw 'found 'browser))
                     (let* ((f (format "%srfc%04d.%s"
                                       rfcview:local-directory number
@@ -902,7 +951,7 @@ hand-off."
                            (file (if (file-exists-p f) f
                                    (rfcview:download-rfc number fmt f))))
                       (when file
-                        (throw 'found (funcall fn number file))))))))))
+                        (throw 'found (funcall fn number file section))))))))))
     (cond ((bufferp buffer)     (pop-to-buffer buffer))
           ((eq buffer 'browser) nil)
           (t (error "RFC%04d is not available" number)))))
