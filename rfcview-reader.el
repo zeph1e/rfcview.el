@@ -499,8 +499,8 @@ has already wrapped in a `rfcview:section-link-button'."
                        'help-echo (format "RFC %d : %s" num
                                           (when rfc (plist-get rfc :title))))
           (save-excursion
-            (when (re-search-backward
-                   "\\(section \\)\\([0-9A-Z]+\\) of \\[?RFC ?[0-9]+\\]?" nil t)
+            (when (looking-back
+                   "\\(section[ \n]+\\)\\([0-9A-Z.]+\\)[ \n]+of[ \n]+\\[?RFC ?[0-9]+\\]?" nil)
               (let* ((section (match-string 2)))
                 (make-button (match-beginning 1) (match-end 2)
                              'type 'rfcview:rfc-link-button
@@ -856,17 +856,16 @@ run on regions with no overlays yet and be a silent no-op."
     (with-current-buffer buf (text-mode) (read-only-mode))
     (pop-to-buffer buf)))
 
-(defun rfcview:open-rfc-txt (number file &optional section)
+(defun rfcview:open-rfc-txt (number file)
   "Open locally cached txt FILE as RFC NUMBER and return the buffer."
   (let ((buffer (get-buffer-create (format "*RFC %04d*" number))))
     (with-current-buffer buffer
       (insert-file-contents file)
       (set-buffer-modified-p nil)
-      (rfcview:read-mode number file)
-      (rfcview:read-jump-to-section section t))
+      (rfcview:read-mode number file))
     buffer))
 
-(defun rfcview:open-rfc-pdf (number file &optional _section)
+(defun rfcview:open-rfc-pdf (number file)
   "Open locally cached PDF FILE as RFC NUMBER in pdf-view-mode and return the buffer.
 Signals an error if pdf-tools is not installed."
   (unless (fboundp 'pdf-view-mode)
@@ -881,7 +880,7 @@ Signals an error if pdf-tools is not installed."
                        b))))
     buffer))
 
-(defun rfcview:open-rfc-fallback (number fmt &optional _section)
+(defun rfcview:open-rfc-fallback (number fmt)
   "Open RFC NUMBER as FMT in the user's browser vina `browse-url'.
 Used for formats not rendered in Emacs (html, xml).  The document is
 not cached locally."
@@ -951,8 +950,11 @@ hand-off."
                            (file (if (file-exists-p f) f
                                    (rfcview:download-rfc number fmt f))))
                       (when file
-                        (throw 'found (funcall fn number file section))))))))))
-    (cond ((bufferp buffer)     (pop-to-buffer buffer))
+                        (throw 'found (funcall fn number file))))))))))
+    (cond ((bufferp buffer) (with-current-buffer buffer
+                              (when (eq major-mode 'rfcview:read-mode)
+                                (pop-to-buffer buffer)
+                                (rfcview:read-jump-to-section section t))))
           ((eq buffer 'browser) nil)
           (t (error "RFC%04d is not available" number)))))
 
