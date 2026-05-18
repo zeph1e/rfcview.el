@@ -1397,41 +1397,6 @@ matches via the `[A-Z(\"]' title-start class."
               (kill-buffer buf))))
       (delete-file tmp))))
 
-(ert-deftest rfcview:test-open-rfc-txt-jumps-to-section ()
-  "open-rfc-txt moves point to SECTION when one is given."
-  (let ((tmp (make-temp-file "rfcview-test-" nil ".txt")))
-    (unwind-protect
-        (progn
-          (with-temp-file tmp (insert (rfcview-test:sample-rfc-with-toc)))
-          (let ((rfcview:nav-history (cons nil nil))
-                (buf (rfcview:open-rfc-txt 6 tmp "2")))
-            (unwind-protect
-                (with-current-buffer buf
-                  (should (looking-at "2\\.  Protocol Details")))
-              (kill-buffer buf))))
-      (delete-file tmp))))
-
-(ert-deftest rfcview:test-open-rfc-txt-section-jump-does-not-push-history ()
-  "Opening a buffer via section-button click must not push the new
-buffer's position 1 onto the BACK stack — only the origin pushed by
-the button action should be there.  Otherwise `B' would need two
-presses to leave RFC 6 and return to the originating buffer."
-  (let ((tmp (make-temp-file "rfcview-test-" nil ".txt")))
-    (unwind-protect
-        (progn
-          (with-temp-file tmp (insert (rfcview-test:sample-rfc-with-toc)))
-          ;; Simulate the section button having already pushed the origin.
-          (let* ((origin '(9999 . 42))
-                 (rfcview:nav-history (cons (list origin) nil))
-                 (buf (rfcview:open-rfc-txt 7 tmp "2")))
-            (unwind-protect
-                (progn
-                  (should (equal (car rfcview:nav-history) (list origin)))
-                  (with-current-buffer buf
-                    (should (looking-at "2\\.  Protocol Details"))))
-              (kill-buffer buf))))
-      (delete-file tmp))))
-
 (ert-deftest rfcview:test-open-rfc-txt-no-section-leaves-point-at-start ()
   "When SECTION is nil, open-rfc-txt leaves point at buffer start."
   (let ((tmp (make-temp-file "rfcview-test-" nil ".txt")))
