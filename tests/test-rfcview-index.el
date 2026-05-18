@@ -832,5 +832,64 @@ prepended to), so the number is not pushed beyond the margin width."
       (rfcview:move-entry-highlight)
       (should (= count-first (length rfcview:margin-highlight-overlays))))))
 
+(ert-deftest rfcview:test-move-entry-highlight-wrap-prefix-has-margin-redirect ()
+  "Each wrap-prefix run in the highlighted entry starts with a character
+whose `display' redirects to the left margin with highlighted spaces — so a
+continuation visual line's left-margin background is highlighted, not just
+the first visual line of the entry."
+  (rfcview-test:with-highlighted-index
+      '((793 . (:title "TCP" :date "1981" :authors ("J. Postel")))) 5
+    (let* ((beg (overlay-start rfcview:background-highlight-overlay))
+           (wp  (get-text-property beg 'wrap-prefix))
+           (d   (and (stringp wp) (get-text-property 0 'display wp)))
+           (margin-str (and (consp d) (cadr d))))
+      (should (stringp wp))
+      (should (consp d))
+      (should (equal (car d) '(margin left-margin)))
+      (should (stringp margin-str))
+      (should (eq (get-text-property 0 'face margin-str)
+                  'rfcview:entry-highlight-face)))))
+
+(ert-deftest rfcview:test-move-entry-highlight-wrap-prefix-preserves-text-width ()
+  "The text-area portion of each wrap-prefix run keeps its original width
+under highlighting — title/authors (2-space margin) and an Obsoletes trait
+prefix (wider) must remain distinct lengths after the 1-char margin
+redirect is prepended."
+  (rfcview-test:with-highlighted-index
+      '((793 . (:title "TCP" :date "1981" :authors ("J. Postel")
+                       :obsoletes (761)))) 5
+    (let* ((beg (overlay-start rfcview:background-highlight-overlay))
+           (end (overlay-end rfcview:background-highlight-overlay))
+           (text-widths nil))
+      (let ((pos beg))
+        (while (and pos (< pos end))
+          (let ((wp (get-text-property pos 'wrap-prefix))
+                (next (or (next-single-property-change pos 'wrap-prefix nil end)
+                          end)))
+            (when (stringp wp)
+              ;; Skip the leading margin-redirect char to get text-area width.
+              (push (1- (length wp)) text-widths))
+            (setq pos next))))
+      (should (> (length (seq-uniq text-widths)) 1)))))
+
+(ert-deftest rfcview:test-move-entry-highlight-restores-prev-wrap-prefix ()
+  "Moving the highlight to a different entry restores the previous entry's
+wrap-prefix to its original (unhighlighted, no margin redirect) form."
+  (rfcview-test:with-highlighted-index
+      '((1   . (:title "First"  :date "1969" :authors ("A")))
+        (793 . (:title "Second" :date "1981" :authors ("B")))) 5
+    (let* ((beg-793 (overlay-start rfcview:background-highlight-overlay))
+           (wp-before-revert (get-text-property beg-793 'wrap-prefix)))
+      ;; While 793 is highlighted, its wrap-prefix carries the margin redirect.
+      (should (consp (get-text-property 0 'display wp-before-revert)))
+      (rfcview:index-goto-number 1)
+      (rfcview:move-entry-highlight)
+      (let ((wp-after (get-text-property beg-793 'wrap-prefix)))
+        (should (stringp wp-after))
+        ;; Restored wrap-prefix should not have the leading margin-redirect.
+        (should-not (consp (get-text-property 0 'display wp-after)))
+        (should-not (eq (get-text-property 0 'face wp-after)
+                        'rfcview:entry-highlight-face))))))
+
 (provide 'test-rfcview-index)
 ;;; test-rfcview-index.el ends here

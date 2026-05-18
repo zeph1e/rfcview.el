@@ -27,6 +27,12 @@
 
 (defvar rfcview:margin-highlight-overlays nil)
 
+(defvar rfcview:index--highlight-prev-prefixes nil
+  "Saved wrap-prefix runs for the previously-highlighted entry: a list
+of (POS NEXT ORIGINAL-WRAP-PREFIX) tuples.  `rfcview:move-entry-highlight'
+uses it to restore each run's original wrap-prefix string when the
+selection moves to a new entry.")
+
 (defun rfcview:initialize (&optional from-scratch)
   "Initialize & update RFC index cache.
 If FROM-SCRATCH is non-nil, discard cached data and
@@ -374,6 +380,10 @@ create the cache from scratch."
                              9999)))
     (setq left-margin-width (1+ (length (number-to-string rfcview--max-rfc))))
     (rfcview:index-apply-window-settings))
+  ;; Entries are rebuilt below, so saved wrap-prefix tuples point at stale
+  ;; positions / strings — clear them before the next `move-entry-highlight'
+  ;; tries to restore over the new buffer contents.
+  (setq rfcview:index--highlight-prev-prefixes nil)
   (let ((inhibit-read-only t)
         (saved-point (unless rfcview:suppress-recover-position
                        (save-excursion
@@ -507,6 +517,51 @@ create the cache from scratch."
   (goto-char (point-min))
   (forward-button 1))
 
+(defun rfcview:index--apply-highlight-wrap-prefix (beg end)
+  "Replace each `wrap-prefix' text-property run in [BEG, END) with a
+highlighted version: a leading character whose `display' redirects to
+the left margin (so a continuation visual line's margin picks up the
+highlight background) followed by the original prefix text propertized
+with `rfcview:entry-highlight-face' (so the text-area indent is
+highlighted at its original width — trait alignment is preserved).
+Returns a list of (POS NEXT ORIGINAL-WP) tuples for later restoration."
+  (let ((inhibit-read-only t)
+        (lmw (or left-margin-width 0))
+        (saved nil))
+    (with-silent-modifications
+      (let ((pos beg))
+        (while (and pos (< pos end))
+          (let ((wp   (get-text-property pos 'wrap-prefix))
+                (next (or (next-single-property-change pos 'wrap-prefix nil end)
+                          end)))
+            (when (stringp wp)
+              (push (list pos next wp) saved)
+              (let* ((margin-bg
+                      (propertize " " 'display
+                                  `((margin left-margin)
+                                    ,(propertize (make-string lmw ?\s)
+                                                 'face 'rfcview:entry-highlight-face))))
+                     (text-prefix
+                      (propertize wp 'face 'rfcview:entry-highlight-face))
+                     (new-wp (concat margin-bg text-prefix)))
+                (put-text-property pos next 'wrap-prefix new-wp)))
+            (setq pos next)))))
+    (nreverse saved)))
+
+(defun rfcview:index--revert-highlight-wrap-prefix (saved)
+  "Restore each wrap-prefix run from SAVED (as returned by
+`rfcview:index--apply-highlight-wrap-prefix').  No-op when SAVED is nil."
+  (let ((inhibit-read-only t))
+    (with-silent-modifications
+      (dolist (s saved)
+        (let ((pos  (nth 0 s))
+              (next (nth 1 s))
+              (orig (nth 2 s)))
+          (when (and (number-or-marker-p pos)
+                     (number-or-marker-p next)
+                     (<= next (point-max)))
+            (put-text-property pos next 'wrap-prefix orig)))))))
+
 (defun rfcview:move-entry-highlight ()
   (when (boundp 'rfcview:background-highlight-overlay)
     (unless (overlayp rfcview:background-highlight-overlay)
@@ -526,6 +581,19 @@ create the cache from scratch."
                      (eq 0 (get-text-property end 'rfcview:number))))
         (setq beg (point-min)
               end (point-min)))
+      ;; Revert the previously-highlighted entry's wrap-prefix runs and apply
+      ;; highlighted versions to the new selection: each wrap-prefix gets a
+      ;; leading margin-display character (so a wrapped continuation visual
+      ;; line's left margin picks up the highlight background) plus the
+      ;; original prefix text propertized with the highlight face (so the
+      ;; text-area indent is highlighted at its original width — title/authors
+      ;; stay at the 2-space margin, traits keep their wider value-column
+      ;; offset).
+      (rfcview:index--revert-highlight-wrap-prefix rfcview:index--highlight-prev-prefixes)
+      (setq rfcview:index--highlight-prev-prefixes nil)
+      (when (< beg end)
+        (setq rfcview:index--highlight-prev-prefixes
+              (rfcview:index--apply-highlight-wrap-prefix beg end)))
       (move-overlay rfcview:background-highlight-overlay beg end)
       (when (< beg end)
         (let ((win (get-buffer-window)))
@@ -535,7 +603,11 @@ create the cache from scratch."
                 (goto-char beg)
                 (while (< (point) end)
                   (let ((lmw      (or left-margin-width 0))
-                        (line-beg (point)))
+                        (line-beg (point))
+                        ;; Capture before `end-of-visual-line' moves point —
+                        ;; tells whether line-beg is at the start of a logical
+                        ;; line (vs. a wrap-continuation visual line).
+                        (at-bol   (bolp)))
                     (end-of-visual-line)
                     (let ((ov-r (make-overlay (point) (point))))
                       (overlay-put ov-r 'after-string
@@ -543,21 +615,32 @@ create the cache from scratch."
                                                `((margin right-margin)
                                                  ,(propertize " " 'face 'rfcview:entry-highlight-face))))
                       (push ov-r rfcview:margin-highlight-overlays))
-                    (if (eq line-beg beg)
-                        ;; First visual line: override the carrier character's display so the
-                        ;; RFC number stays visible under the highlight.  A before-string here
-                        ;; would concatenate with the carrier's own margin display and push the
-                        ;; number beyond the margin width, making it invisible.
-                        (let* ((num (get-text-property beg 'rfcview:number))
-                               (num-str (format (format "%%%ds" lmw) (or num "")))
-                               (ov-l (make-overlay beg (1+ beg))))
-                          (overlay-put ov-l 'display
-                                       `((margin left-margin)
-                                         ,(propertize num-str
-                                                      'face (if rfcview:use-face
-                                                                '(rfcview:rfc-number-face rfcview:entry-highlight-face)
-                                                              'rfcview:entry-highlight-face))))
-                          (push ov-l rfcview:margin-highlight-overlays))
+                    (cond
+                     ;; First visual line of the entry: override the carrier
+                     ;; character's display so the RFC number stays visible
+                     ;; under the highlight.  A before-string here would
+                     ;; concatenate with the carrier's own margin display and
+                     ;; push the number beyond the margin width.
+                     ((eq line-beg beg)
+                      (let* ((num (get-text-property beg 'rfcview:number))
+                             (num-str (format (format "%%%ds" lmw) (or num "")))
+                             (ov-l (make-overlay beg (1+ beg))))
+                        (overlay-put ov-l 'display
+                                     `((margin left-margin)
+                                       ,(propertize num-str
+                                                    'face (if rfcview:use-face
+                                                              '(rfcview:rfc-number-face rfcview:entry-highlight-face)
+                                                            'rfcview:entry-highlight-face))))
+                        (push ov-l rfcview:margin-highlight-overlays)))
+                     ;; First visual line of a subsequent logical line
+                     ;; (authors, traits): no carrier here, so a zero-width
+                     ;; before-string places highlighted spaces in the margin.
+                     ;; Wrap-continuation visual lines are NOT handled here —
+                     ;; their margin is covered by the wrap-prefix margin
+                     ;; redirect installed by `rfcview:index--apply-highlight-wrap-prefix'
+                     ;; and handling them here too would stack two margin
+                     ;; glyphs at the same position.
+                     (at-bol
                       (let ((ov-l (make-overlay line-beg line-beg)))
                         (overlay-put ov-l 'before-string
                                      (propertize " " 'display
@@ -565,7 +648,7 @@ create the cache from scratch."
                                                    ,(propertize (make-string lmw ?\s)
                                                                 'face 'rfcview:entry-highlight-face))))
                         (push ov-l rfcview:margin-highlight-overlays))))
-                  (vertical-motion 1))))))))))
+                    (vertical-motion 1)))))))))))
 
 (defun rfcview:index-read-item (&optional number)
   (interactive)
@@ -730,7 +813,8 @@ chronological order; Keywords preserves relevance-score order."
     (when (overlayp rfcview:background-highlight-overlay)
       (delete-overlay rfcview:background-highlight-overlay))
     (mapc #'delete-overlay rfcview:margin-highlight-overlays)
-    (setq rfcview:margin-highlight-overlays nil))
+    (setq rfcview:margin-highlight-overlays nil
+          rfcview:index--highlight-prev-prefixes nil))
   (setq rfcview:rfc-cache nil))
 
 (defun rfcview:index-mode ()
@@ -748,6 +832,7 @@ Keybindings:
   (setq right-margin-width 15)
   (set (make-local-variable 'rfcview:background-highlight-overlay) nil)
   (set (make-local-variable 'rfcview:margin-highlight-overlays) nil)
+  (set (make-local-variable 'rfcview:index--highlight-prev-prefixes) nil)
   (add-hook 'kill-buffer-hook 'rfcview:index-cleanup t t)
   (add-hook 'kill-emacs-hook 'rfcview:index-cleanup)
   (add-hook 'post-command-hook 'rfcview:move-entry-highlight t t)

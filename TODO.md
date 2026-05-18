@@ -11,4 +11,4 @@
 - [ ] Make RFC doc header be fancy not just dimming.
 - [ ] Apply more intelligent scoring for keyword search.
 - [ ] Fix mouse overlay on index; only can select on text, left/right margin do not show mouse overlay
-- [ ] Fix `rfcview:entry-highlight-face` doesn't cover all area when line breaking happens
+- [x] Fix `rfcview:entry-highlight-face` doesn't cover all area when line breaking happens
