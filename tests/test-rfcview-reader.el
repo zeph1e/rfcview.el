@@ -718,6 +718,17 @@ one blank line is left visible (overlay ends before it)."
       (let ((sections (rfcview-test:collect-section-refs)))
         (should (member "2.1" sections))))))
 
+(ert-deftest rfcview:test-read-buttonize-refs-chained-three-sections ()
+  "'Sections AA and BB and CC of RFC 1234' creates a button per section."
+  (let ((rfcview:rfc-cache nil))
+    (with-temp-buffer
+      (insert "See Sections AA and BB and CC of RFC 1234 for details.\n")
+      (rfcview:read-buttonize-refs)
+      (let ((sections (rfcview-test:collect-section-refs)))
+        (should (member "AA" sections))
+        (should (member "BB" sections))
+        (should (member "CC" sections))))))
+
 ;;; ─── rfcview:read-buttonize-toc ─────────────────────────────────────────────
 
 (defun rfcview-test:sample-rfc-with-toc ()

@@ -503,8 +503,9 @@ has already wrapped in a `rfcview:section-link-button'."
                    ;; Section A.1 of RFC 1234
                    ;; Section 2 of RFC1234
                    ;; Sections 1.2.1 and 1.2.3 of [RFC1234] (RFC 9951)
+                   ;; Sections AA and BB and CC of RFC 1234
                    (concat "\\(section[s]?[ \n]+\\)\\([0-9A-Z.]+\\)"
-                           "\\([ \n]+\\(and\\|or\\)[ \n]+[0-9A-Z.]+\\)?"
+                           "\\(\\(?:[ \n]+\\(?:and\\|or\\)[ \n]+[0-9A-Z.]+\\)+\\)?"
                            "[ \n]+of[ \n]+\\[?RFC ?[0-9]+\\]?")
                    nil)
               (let* ((section (match-string 2))
@@ -522,6 +523,7 @@ has already wrapped in a `rfcview:section-link-button'."
                                                 section num))
                 (save-excursion
                   (while (and more-begin
+                              (< more-begin more-end)
                               (progn
                                 (goto-char more-begin)
                                 (looking-at
@@ -539,8 +541,7 @@ has already wrapped in a `rfcview:section-link-button'."
                                    'help-echo (format
                                                "Jump to Section %s of RFC %d"
                                                more-section num)))
-                    (setq more-begin (and (match-end 3)
-                                          (1+ (match-end 3))))))))))))))
+                    (setq more-begin (match-end 2))))))))))))
 
 (defun rfcview:read--make-section-button (beg end target)
   "Wrap [BEG, END) in a section-link button that jumps to marker TARGET."
