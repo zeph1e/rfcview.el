@@ -59,7 +59,9 @@ rfcview-core.el  ←  rfcview-index.el  ←┐
 
 ### rfcview-core.el — shared data, faces, and network
 
-All `defcustom` declarations (group `rfcview`) and most `defface` definitions live here, along with the shared `rfcview:rfc-link-button` button type. Core also holds the cache variable `rfcview:rfc-cache` (a plist with `:last-modified`, `:table` hash-table keyed by RFC number, `:favorite`, and `:recent`), network functions (`rfcview:retrieve`, `rfcview:retrieve-rfc`, `rfcview:retrieve-index`), cache persistence (`rfcview:load-cache` / `rfcview:save-cache`), and the text-wrapping utility `rfcview:wrap-text-at-word-boundary`.
+All `defcustom` declarations (group `rfcview`) and most `defface` definitions live here, along with the shared `rfcview:rfc-link-button` button type. Core also holds the cache variable `rfcview:rfc-cache` (a plist with `:version`, `:last-modified`, `:table` hash-table keyed by RFC number, `:favorite`, and `:recent`), network functions (`rfcview:retrieve`, `rfcview:retrieve-rfc`, `rfcview:retrieve-index`), cache persistence (`rfcview:load-cache` / `rfcview:save-cache`), and the text-wrapping utility `rfcview:wrap-text-at-word-boundary`.
+
+The cache is versioned: `rfcview:rfc-cache-version` (currently `2`) is stored under the `:version` key. On load, a mismatched version is handed to `rfcview:update-cache`, which preserves `:favorite` and `:recent` and resets everything else so the next index refresh rebuilds it. Bump the constant whenever the on-disk layout changes incompatibly. Per-entry plists in `:table` carry `:number`, `:title`, `:authors`, `:format` (list of strings like `"TXT"`, `"PDF"`), `:date`, optional `:status`, and trait lists (`:obsoletes`, `:obsoleted-by`, `:updated-by`, etc.).
 
 Note: `rfcview:read-rfc-header-face`, `rfcview:read-rfc-title-face`, and `rfcview:read-rfc-section-face` are defined in `rfcview-reader.el`, not here — they are reader-specific and not needed in the index.
 
