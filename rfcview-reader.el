@@ -500,8 +500,16 @@ has already wrapped in a `rfcview:section-link-button'."
                                           (when rfc (plist-get rfc :title))))
           (save-excursion
             (when (looking-back
-                   "\\(section[ \n]+\\)\\([0-9A-Z.]+\\)[ \n]+of[ \n]+\\[?RFC ?[0-9]+\\]?" nil)
-              (let* ((section (match-string 2)))
+                   ;; Section A.1 of RFC 1234
+                   ;; Section 2 of RFC1234
+                   ;; Sections 1.2.1 and 1.2.3 of [RFC1234] (RFC 9951)
+                   (concat "\\(section[s]?[ \n]+\\)\\([0-9A-Z.]+\\)"
+                           "\\([ \n]+\\(and\\|or\\)[ \n]+[0-9A-Z.]+\\)?"
+                           "[ \n]+of[ \n]+\\[?RFC ?[0-9]+\\]?")
+                   nil)
+              (let* ((section (match-string 2))
+                     (more-begin (match-beginning 3))
+                     (more-end (match-end 3)))
                 (make-button (match-beginning 1) (match-end 2)
                              'type 'rfcview:rfc-link-button
                              'number num
@@ -511,7 +519,28 @@ has already wrapped in a `rfcview:section-link-button'."
                                  (rfcview:read-rfc (button-get btn 'number)
                                                    (button-get btn 'section)))
                              'help-echo (format "Jump to Section %s of RFC %d"
-                                                section num))))))))))
+                                                section num))
+                (save-excursion
+                  (while (and more-begin
+                              (progn
+                                (goto-char more-begin)
+                                (looking-at
+                                 "[ \n]+\\(and\\|or\\)[ \n]+\\([0-9A-Z.]+\\)")))
+                    (let ((more-section (match-string 2)))
+                      (make-button (match-beginning 2) (match-end 2)
+                                   'type 'rfcview:rfc-link-button
+                                   'number num
+                                   'section more-section
+                                   'action (lambda (btn)
+                                             (rfcview:nav-push)
+                                             (rfcview:read-rfc
+                                              (button-get btn 'number)
+                                              (button-get btn 'section)))
+                                   'help-echo (format
+                                               "Jump to Section %s of RFC %d"
+                                               more-section num)))
+                    (setq more-begin (and (match-end 3)
+                                          (1+ (match-end 3))))))))))))))
 
 (defun rfcview:read--make-section-button (beg end target)
   "Wrap [BEG, END) in a section-link button that jumps to marker TARGET."

@@ -7,6 +7,7 @@
 - [x] Fix erasing first line just after ^L
 - [x] handle url
 - [x] handle Section XX of RFC XXX.
+- [x] handle sections xxx and xxx of RFC XXX
 - [ ] Read Format, Status traits from rfc-index and show in the index buffer (format as icon?)
 - [ ] Make RFC doc header be fancy not just dimming.
 - [ ] Apply more intelligent scoring for keyword search.
