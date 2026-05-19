@@ -677,6 +677,47 @@ one blank line is left visible (overlay ends before it)."
         (should (string-match-p "Transmission Control Protocol"
                                  (button-get btn 'help-echo)))))))
 
+(defun rfcview-test:collect-section-refs ()
+  "Return the set of `'section' values from rfc-link-buttons in the buffer."
+  (let (sections)
+    (save-excursion
+      (goto-char (point-min))
+      (while (forward-button 1 nil nil t)
+        (let ((b (button-at (point))))
+          (when (and (eq (button-type b) 'rfcview:rfc-link-button)
+                     (button-get b 'section))
+            (push (button-get b 'section) sections)))))
+    sections))
+
+(ert-deftest rfcview:test-read-buttonize-refs-multi-section-and ()
+  "'Sections X and Y of RFC NNNN' creates a separate button per section."
+  (let ((rfcview:rfc-cache nil))
+    (with-temp-buffer
+      (insert "See Sections 1.2 and 3.4 of RFC 9999 for details.\n")
+      (rfcview:read-buttonize-refs)
+      (let ((sections (rfcview-test:collect-section-refs)))
+        (should (member "1.2" sections))
+        (should (member "3.4" sections))))))
+
+(ert-deftest rfcview:test-read-buttonize-refs-multi-section-or ()
+  "'Sections X or Y of [RFC NNNN]' creates a separate button per section."
+  (let ((rfcview:rfc-cache nil))
+    (with-temp-buffer
+      (insert "Per Sections 2 or 4 of [RFC 9999].\n")
+      (rfcview:read-buttonize-refs)
+      (let ((sections (rfcview-test:collect-section-refs)))
+        (should (member "2" sections))
+        (should (member "4" sections))))))
+
+(ert-deftest rfcview:test-read-buttonize-refs-single-section-still-works ()
+  "Single-section form ('Section X of RFC NNNN') still creates a button."
+  (let ((rfcview:rfc-cache nil))
+    (with-temp-buffer
+      (insert "See Section 2.1 of RFC 9999.\n")
+      (rfcview:read-buttonize-refs)
+      (let ((sections (rfcview-test:collect-section-refs)))
+        (should (member "2.1" sections))))))
+
 ;;; ─── rfcview:read-buttonize-toc ─────────────────────────────────────────────
 
 (defun rfcview-test:sample-rfc-with-toc ()
@@ -1551,6 +1592,36 @@ that regex fails to match a line that contains only \\r (from CRLF)."
               ((symbol-function 'pop-to-buffer) #'ignore))
       (rfcview:read-rfc 8)
       (should-not downloaded))))
+
+(ert-deftest rfcview:test-read-rfc-jumps-section-in-reused-buffer ()
+  "rfcview:read-rfc with SECTION jumps in an already-open *RFC* buffer."
+  (let ((existing (get-buffer-create "*RFC 9999*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer existing
+            (let ((inhibit-read-only t))
+              (erase-buffer)
+              (insert (rfcview-test:sample-rfc-with-toc)))
+            (rfcview:read-mode 9999 nil)
+            (goto-char (point-min)))
+          (cl-letf (((symbol-function 'pop-to-buffer) #'ignore))
+            (rfcview:read-rfc 9999 "1.1"))
+          (with-current-buffer existing
+            (should (looking-at "1\\.1  Goals"))))
+      (kill-buffer existing))))
+
+(ert-deftest rfcview:test-read-rfc-html-fallback-no-arity-error ()
+  "html-only RFC dispatches to open-rfc-fallback without an arity error."
+  (let* ((tbl (make-hash-table))
+         (rfcview:rfc-cache (progn (puthash 9999 '(:format ("HTML")) tbl)
+                                   (list :version 2 :table tbl)))
+         (rfcview:preferred-format 'html)
+         browsed)
+    (cl-letf (((symbol-function 'browse-url)
+               (lambda (url &rest _) (setq browsed url))))
+      (rfcview:read-rfc 9999 "3.2")
+      (should browsed)
+      (should (string-match-p "rfc9999\\.html" browsed)))))
 
 ;;; ─── rfcview:nav-history ────────────────────────────────────────────────────
 

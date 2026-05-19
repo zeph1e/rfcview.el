@@ -971,7 +971,7 @@ hand-off."
                 (dolist (fmt formats)
                   (let ((fn (cdr (assq fmt rfcview:open-rfc-functions))))
                     (unless fn
-                      (rfcview:open-rfc-fallback number fmt section)
+                      (rfcview:open-rfc-fallback number fmt)
                       (throw 'found 'browser))
                     (let* ((f (format "%srfc%04d.%s"
                                       rfcview:local-directory number
