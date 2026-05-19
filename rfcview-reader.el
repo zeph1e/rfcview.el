@@ -98,6 +98,9 @@ Fallback lookup for TOC entries without a section number.")
    ;; arbitrary nesting depth), also handles a title that wraps onto one indented
    ;; continuation line.
    "\\|^\n[A-Z]\\(?:\\.[0-9]\\{1,2\\}\\)+\\.?[ \t]+[A-Z][^\n]*\\(?:\n[ \t]\\{5,\\}[^\n]+\\)?\n\n"
+   ;; Dash-form appendix subsection (RFC 1001 style): "A-1.  Title" / "B-1.1  Title"
+   ;; / "B-6.1  Title".  1-2 digits per segment for symmetry with the dot form.
+   "\\|^\n[A-Z]-[0-9]+\\(?:\\.[0-9]\\{1,2\\}\\)*\\.?[ \t]+[A-Z][^\n]*\n\n"
    ;; ALL-CAPS bare-word headings (RFC 854/959/1122 era):
    ;; "INTRODUCTION" / "GENERAL CONSIDERATIONS" / "LINK LAYER REFERENCES"
    "\\|^\n[A-Z][-A-Z() ]\\{,50\\}[A-Z]\n\n"
@@ -310,7 +313,17 @@ ALL-CAPS, Abstract, etc.)."
                marker rfcview:read-section-anchors-by-number)
       (puthash (rfcview:read--normalize-title (match-string 2 heading-line))
                marker rfcview:read-section-anchors-by-title))
-     ((string-match "\\`APPENDIX \\([A-Z]\\|[IVX]+\\)[: \t-]+\\(.*\\)" heading-line)
+     ((string-match "\\`APPENDIX \\([A-Z]\\|[IVX]+\\)\\(?:[: \t-]+\\(.*\\)\\)?\\'"
+                    heading-line)
+      (puthash (match-string 1 heading-line)
+               marker rfcview:read-section-anchors-by-number)
+      (let ((title (match-string 2 heading-line)))
+        (puthash (rfcview:read--normalize-title
+                  (if (and title (> (length title) 0)) title heading-line))
+                 marker rfcview:read-section-anchors-by-title)))
+     ;; Dash-form appendix subsection (RFC 1001): "A-1.  Title" / "B-1.1  Title".
+     ((string-match "\\`\\([A-Z]-[0-9]+\\(?:\\.[0-9]+\\)*\\)\\.?[ \t]+\\(.*\\)"
+                    heading-line)
       (puthash (match-string 1 heading-line)
                marker rfcview:read-section-anchors-by-number)
       (puthash (rfcview:read--normalize-title (match-string 2 heading-line))
@@ -573,7 +586,12 @@ is nothing to dim (TOCs without leaders, like RFC 9227)."
                            'face 'rfcview:read-toc-leader-face)))
     (when entry-end
       (forward-line 1)
-      (while (< (point) entry-end)
+      ;; `<=' (not `<') so a leader that sits on its own line (RFC 1005
+      ;; style: title on lines 1-2, leader+page on line 3) is reached —
+      ;; `absorb-toc-continuations' returns the start of that leader line
+      ;; as `entry-end' so the section-link button stops there, but the
+      ;; leader text itself still needs to be dimmed.
+      (while (<= (point) entry-end)
         (when (re-search-forward
                "\\([ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)[ \t]*$"
                (line-end-position) t)
@@ -635,18 +653,39 @@ or if the anchor tables are empty."
         (when (re-search-forward
                "^[ \t]*\\(?:[0-9]+\\.[ \t]+\\)?Table of Contents[ \t]*$" nil t)
           (forward-line 1)
-          (let ((toc-end (save-excursion
-                           (if (re-search-forward
-                                rfcview:section-heading-regexp nil t)
-                               (match-beginning 0)
-                             (point-max)))))
+          ;; In RFCs whose TOC entries are blank-line-separated (e.g. RFC
+          ;; 1001), each entry matches `rfcview:section-heading-regexp', so
+          ;; the naive "next heading" would land on the first TOC entry
+          ;; itself.  Skip headings whose title line ends with a trailing
+          ;; page number (the TOC's right column) — those are TOC entries,
+          ;; not real headings.  The stop-regexp also accepts centered
+          ;; ALL-CAPS headings with 10+ leading spaces (e.g. RFC 1005's
+          ;; "FIGURES" between the TOC and body) — `section-heading-regexp'
+          ;; deliberately requires `^[A-Z]' at column 0 for safety, but
+          ;; here we need to halt before the figures table whose entries
+          ;; otherwise get buttonized as TOC entries.
+          (let* ((stop-regexp
+                  (concat rfcview:section-heading-regexp
+                          "\\|^\n[ \t]\\{10,\\}[A-Z][-A-Z() ]\\{,50\\}[A-Z]\n\n"))
+                 (toc-end (save-excursion
+                            (let ((found nil))
+                              (while (and (not found)
+                                          (re-search-forward stop-regexp nil t))
+                                (let* ((mb (match-beginning 0))
+                                       (str (match-string 0))
+                                       (line1 (or (nth 1 (split-string str "\n"))
+                                                  "")))
+                                  (unless (string-match-p
+                                           "[ \t][0-9]+[ \t]*\\'" line1)
+                                    (setq found mb))))
+                              (or found (point-max))))))
             (with-silent-modifications
               (while (< (point) toc-end)
                 (let ((extra 0))
                   (cond
                    ;; Numbered: "   1.2.  Title ............. 7" (title may wrap)
                    ((looking-at
-                     "^[ \t]*\\([0-9]+\\(?:\\.[0-9]+\\)*\\)\\.?[ \t]+\\(.+?\\)\\(?:[ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)?[ \t]*$")
+                     "^[ \t]*\\([0-9]+\\(?:\\.[0-9]+\\)*\\)\\.?[ \t]+\\(.+?\\)\\(?:\\(?:\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*\\|[ \t]\\{3,\\}\\)[0-9]+\\)?[ \t]*$")
                     (let* ((num (match-string-no-properties 1))
                            (tb (match-beginning 2))
                            (line1-te (match-end 2))
@@ -660,7 +699,7 @@ or if the anchor tables are empty."
                    ;; Appendix subsection: "   A.1  Foo ......... 30",
                    ;; nesting may go arbitrary depth ("A.4.1", "A.4.1.1", ...).
                    ((looking-at
-                     "^[ \t]*\\([A-Z]\\(?:\\.[0-9]+\\)+\\)\\.?[ \t]+\\(.+?\\)\\(?:[ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)?[ \t]*$")
+                     "^[ \t]*\\([A-Z]\\(?:\\.[0-9]+\\)+\\)\\.?[ \t]+\\(.+?\\)\\(?:\\(?:\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*\\|[ \t]\\{3,\\}\\)[0-9]+\\)?[ \t]*$")
                     (let* ((num (match-string-no-properties 1))
                            (tb (match-beginning 2))
                            (line1-te (match-end 2))
@@ -671,9 +710,40 @@ or if the anchor tables are empty."
                       (when target
                         (rfcview:read--make-section-button tb te target))
                       (rfcview:read--dim-toc-tail line1-te te)))
+                   ;; Dash-form appendix subsection (RFC 1001 style):
+                   ;; "   A-1.  Title ............ 61" / "  B-1.1  Title ........ 63".
+                   ;; Placed before the bare-APPENDIX case so the `A`/`B` letter
+                   ;; doesn't get swallowed by Appendix's letter group.
+                   ((looking-at
+                     "^[ \t]*\\([A-Z]-[0-9]+\\(?:\\.[0-9]+\\)*\\)\\.?[ \t]+\\(.+?\\)\\(?:\\(?:\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*\\|[ \t]\\{3,\\}\\)[0-9]+\\)?[ \t]*$")
+                    (let* ((num (match-string-no-properties 1))
+                           (tb (match-beginning 2))
+                           (line1-te (match-end 2))
+                           (target (gethash num rfcview:read-section-anchors-by-number))
+                           (cont (rfcview:read--absorb-toc-continuations tb line1-te toc-end))
+                           (te (car cont)))
+                      (setq extra (cdr cont))
+                      (when target
+                        (rfcview:read--make-section-button tb te target))
+                      (rfcview:read--dim-toc-tail line1-te te)))
+                   ;; Bare APPENDIX (RFC 1001 style): "APPENDIX A    ...    61".
+                   ;; The line has no title — just the letter and a page number.
+                   ;; The button covers the "APPENDIX X" span.  Must precede the
+                   ;; "Appendix [A-Z]. Title" case below, which (under
+                   ;; case-fold-search) would otherwise greedily consume the page
+                   ;; number as the title.
+                   ((looking-at
+                     "^[ \t]*\\(APPENDIX[ \t]+[A-Z]\\)\\(?:\\(?:\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*\\|[ \t]\\{3,\\}\\)[0-9]+\\)?[ \t]*$")
+                    (let* ((tb (match-beginning 1))
+                           (te (match-end 1))
+                           (letter (substring (match-string-no-properties 1) -1))
+                           (target (gethash letter rfcview:read-section-anchors-by-number)))
+                      (when target
+                        (rfcview:read--make-section-button tb te target))
+                      (rfcview:read--dim-toc-tail te)))
                    ;; Appendix: "   Appendix A.  Title ......... 30"
                    ((looking-at
-                     "^[ \t]*Appendix[ \t]+\\([A-Z]\\)\\.?[ \t]+\\(.+?\\)\\(?:[ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)?[ \t]*$")
+                     "^[ \t]*Appendix[ \t]+\\([A-Z]\\)\\.?[ \t]+\\(.+?\\)\\(?:\\(?:\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*\\|[ \t]\\{3,\\}\\)[0-9]+\\)?[ \t]*$")
                     (let* ((letter (match-string-no-properties 1))
                            (tb (match-beginning 2))
                            (line1-te (match-end 2))
@@ -686,7 +756,7 @@ or if the anchor tables are empty."
                       (rfcview:read--dim-toc-tail line1-te te)))
                    ;; Unnumbered: "   Acknowledgements ........... 25"
                    ((looking-at
-                     "^[ \t]*\\([A-Z][^\n]*?\\)\\(?:[ \t]+\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*[0-9]+\\)?[ \t]*$")
+                     "^[ \t]*\\([A-Z][^\n]*?\\)\\(?:\\(?:\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*\\|[ \t]\\{3,\\}\\)[0-9]+\\)?[ \t]*$")
                     (let* ((title (match-string-no-properties 1))
                            (tb (match-beginning 1))
                            (te (match-end 1))

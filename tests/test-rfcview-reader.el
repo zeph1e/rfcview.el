@@ -944,6 +944,222 @@ detected and their (also wrapped) TOC entries are buttonized (RFC 9950 §A/B.1/B
       (should (member heading-b-pos targets))
       (should (member heading-b1-pos targets)))))
 
+(ert-deftest rfcview:test-read-buttonize-toc-blank-line-separated-entries ()
+  "RFC 1001-style TOCs put a blank line between entries, so each entry matches
+`rfcview:section-heading-regexp'.  The naive `next heading' calculation would
+land on the first TOC entry and abort the loop; verify the toc-end scan skips
+headings whose title line ends with a trailing page number."
+  (with-temp-buffer
+    (insert "                        TABLE OF CONTENTS\n"
+            "\n"
+            "\n"
+            "1.  STATUS OF THIS MEMO                                             6\n"
+            "\n"
+            "2.  ACKNOWLEDGEMENTS                                                7\n"
+            "\n"
+            "3.  INTRODUCTION                                                    8\n"
+            "\n"
+            "1.  STATUS OF THIS MEMO\n"
+            "\n"
+            "   Body of status.\n"
+            "\n"
+            "2.  ACKNOWLEDGEMENTS\n"
+            "\n"
+            "   Body of ack.\n"
+            "\n"
+            "3.  INTRODUCTION\n"
+            "\n"
+            "   Body of intro.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let ((labels (mapcar #'car (rfcview-test:section-buttons))))
+      (should (member "STATUS OF THIS MEMO" labels))
+      (should (member "ACKNOWLEDGEMENTS" labels))
+      (should (member "INTRODUCTION" labels)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-stops-at-centered-figures-heading ()
+  "RFC 1005 has a centered `FIGURES' table between the TOC and the body.  Its
+entries (`2.1  IP Class A Mapping ... 6') look exactly like TOC entries and
+share section numbers with real TOC entries, so without a stop signal the
+buttonize loop would buttonize them — pointing the figure entries at the
+real sections.  The `toc-end' calculation must halt at the centered ALL-CAPS
+heading (`section-heading-regexp' deliberately requires `^[A-Z]' at column 0,
+so an indented heading like `FIGURES' would otherwise be missed)."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "        1   INTRODUCTION.......................................... 4\n"
+            "        2.1  Real Section ........................................ 6\n"
+            "\n"
+            "                                  FIGURES\n"
+            "\n"
+            "        2.1  Some Figure............................................ 6\n"
+            "\n"
+            "1  INTRODUCTION\n"
+            "\n"
+            "   Body.\n"
+            "\n"
+            "2.1  Real Section\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let ((labels (mapcar #'car (rfcview-test:section-buttons))))
+      (should (member "INTRODUCTION" labels))
+      (should (member "Real Section" labels))
+      ;; The figure entry "Some Figure" sits after the FIGURES heading; the
+      ;; loop must stop before reaching it so it does not get buttonized.
+      (should-not (member "Some Figure" labels)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-adjacent-dot-leader ()
+  "RFC 1005-style TOC entries have the dot leader adjacent to the title with
+no separating whitespace (`INTRODUCTION.......................... 4').  The
+button label must be just the title — the leader and trailing page must dim
+and not be swallowed into the title."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "        1   INTRODUCTION.......................................... 4\n"
+            "        2   IP ISSUES............................................. 6\n"
+            "\n"
+            "1  INTRODUCTION\n"
+            "\n"
+            "   Body.\n"
+            "\n"
+            "2  IP ISSUES\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let* ((btns (rfcview-test:section-buttons))
+           (labels (mapcar #'car btns)))
+      (should (member "INTRODUCTION" labels))
+      (should (member "IP ISSUES" labels)))
+    ;; The dot-leader chars should have the leader face, not the section/title face.
+    (goto-char (point-min))
+    (re-search-forward "INTRODUCTION\\.\\.")
+    (should (eq (get-char-property (match-end 0) 'face)
+                'rfcview:read-toc-leader-face))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-leader-only-continuation-line ()
+  "RFC 1005-style wrapped TOC entries put the title on lines 1-2 and the dot
+leader on a separate (third) line.  The leader on that standalone line must
+visually dim (carry `rfcview:read-toc-leader-face')."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "        2.1   Current Interpretation of Class A IP Address\n"
+            "              Fields\n"
+            "               ................................................... 6\n"
+            "\n"
+            "2.1  Current Interpretation of Class A IP Address Fields\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (goto-char (point-min))
+    (re-search-forward "^[ ]+\\.\\.\\.")
+    (let* ((bol (line-beginning-position))
+           (eol (line-end-position)))
+      (should (eq (get-char-property (+ bol 20) 'face)
+                  'rfcview:read-toc-leader-face))
+      (should (eq (get-char-property (1- eol) 'face)
+                  'rfcview:read-toc-leader-face)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-bare-appendix-rfc1001 ()
+  "RFC 1001-style bare APPENDIX (just the letter, no title on the heading line)
+gets a button linking to the body's `APPENDIX A` line, and its dash-form
+subsections (A-1, A-2) link to the matching `A-N.  Title` body headings."
+  (with-temp-buffer
+    (insert "                        TABLE OF CONTENTS\n"
+            "\n"
+            "\n"
+            "APPENDIX A                                                         61\n"
+            "   A-1.  ADDITIONAL PROTOCOL REQUIRED IN B AND M NODES              61\n"
+            "   A-2.  CONSTRAINTS                                                61\n"
+            "\n"
+            "APPENDIX A\n"
+            "\n"
+            "   Body of appendix A.\n"
+            "\n"
+            "A-1.  ADDITIONAL PROTOCOL REQUIRED IN B AND M NODES\n"
+            "\n"
+            "   Body of A-1.\n"
+            "\n"
+            "A-2.  CONSTRAINTS\n"
+            "\n"
+            "   Body of A-2.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let* ((btns (rfcview-test:section-buttons))
+           (labels (mapcar #'car btns)))
+      (should (member "APPENDIX A" labels))
+      (should (member "ADDITIONAL PROTOCOL REQUIRED IN B AND M NODES" labels))
+      (should (member "CONSTRAINTS" labels)))))
+
+(ert-deftest rfcview:test-read-buttonize-toc-dash-form-nested-subsection ()
+  "Dash-form sub-subsections (B-1.1, B-6.1) resolve via the by-number map."
+  (with-temp-buffer
+    (insert "Table of Contents\n"
+            "\n"
+            "   B-1.  IMPLEMENTATION MODELS                                     62\n"
+            "      B-1.1  MODEL INDEPENDENT CONSIDERATIONS                      63\n"
+            "      B-1.2  SERVICE OPERATION FOR EACH MODEL                      63\n"
+            "\n"
+            "B-1.  IMPLEMENTATION MODELS\n"
+            "\n"
+            "   Body.\n"
+            "\n"
+            "B-1.1  MODEL INDEPENDENT CONSIDERATIONS\n"
+            "\n"
+            "   Body.\n"
+            "\n"
+            "B-1.2  SERVICE OPERATION FOR EACH MODEL\n"
+            "\n"
+            "   Body.\n")
+    (rfcview:read-fontify)
+    (rfcview:read-buttonize-toc)
+    (let ((labels (mapcar #'car (rfcview-test:section-buttons))))
+      (should (member "IMPLEMENTATION MODELS" labels))
+      (should (member "MODEL INDEPENDENT CONSIDERATIONS" labels))
+      (should (member "SERVICE OPERATION FOR EACH MODEL" labels)))))
+
+(ert-deftest rfcview:test-section-heading-regexp-dash-form-subsection ()
+  "Dash-form RFC 1001 subsection headings (A-1., B-1.1) match the section regex
+with the title outside group 1."
+  (with-temp-buffer
+    (insert "\nA-1.  Additional Protocol\n\n"
+            "\nB-1.1  Model Independent Considerations\n\n")
+    (goto-char (point-min))
+    (should (re-search-forward rfcview:section-heading-regexp nil t))
+    (should (string-match-p "A-1\\." (match-string 0)))
+    (should (re-search-forward rfcview:section-heading-regexp nil t))
+    (should (string-match-p "B-1\\.1" (match-string 0)))))
+
+(ert-deftest rfcview:test-read-register-anchor-bare-appendix-by-number ()
+  "Body's bare `APPENDIX A` registers under both number key `A` and title
+`appendix a' so TOC entries can find it via either lookup."
+  (with-temp-buffer
+    (insert "Network Working Group\n"
+            "Request for Comments: 9999\n"
+            "\n"
+            "                       Sample\n"
+            "\n"
+            "Abstract\n"
+            "\n"
+            "   Some text.\n"
+            "\n"
+            "1.  Introduction\n"
+            "\n"
+            "   Body.\n"
+            "\n"
+            "APPENDIX A\n"
+            "\n"
+            "   Body of A.\n")
+    (rfcview:read-fontify)
+    (should (gethash "A" rfcview:read-section-anchors-by-number))
+    (should (gethash "appendix a" rfcview:read-section-anchors-by-title))))
+
 (ert-deftest rfcview:test-read-buttonize-toc-spaced-dot-leader ()
   "TOC entries with spaced-dot leaders (`. . . . .`) are buttonized cleanly."
   (with-temp-buffer
