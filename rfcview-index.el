@@ -207,13 +207,13 @@ create the cache from scratch."
         (put-text-property 1 text-beg 'face 'rfcview:rfc-number-face title-str)
         (put-text-property text-beg (1- (length title-str)) 'face 'rfcview:rfc-title-face title-str)
         (when (eq rfcview:index-filter 'rfcview:index-filter-function-keywords)
-          (let ((pos text-beg))
+          (let ((case-fold-search t))
             (dolist (keyword (split-string rfcview:filter-keyword-current-keyword nil t))
-              (setq pos text-beg)
-              (while (string-match keyword title-str pos)
-                (put-text-property (match-beginning 0) (match-end 0)
-                                   'face 'rfcview:rfc-selected-filter-face title-str)
-                (setq pos (match-end 0)))))))
+              (let ((pos text-beg))
+                (while (string-match (regexp-quote keyword) title-str pos)
+                  (put-text-property (match-beginning 0) (match-end 0)
+                                     'face 'rfcview:rfc-selected-filter-face title-str)
+                  (setq pos (match-end 0))))))))
       (push title-str parts))
 
     (let* ((author-text (mapconcat #'identity authors ", "))
@@ -768,37 +768,65 @@ chronological order; Keywords preserves relevance-score order."
 ;;  ("keywrodB" . '(....))
 ;; ...)
 (defun rfcview:index-filter-function-keywords ()
+  ;; Additive, case-insensitive, multi-field scoring:
+  ;;   RFC# exact match: +500  phrase in title: +200  all-word-match in title: +100
+  ;;   per keyword: title word +20, title sub +5, author word +15, author sub +5, status sub +5
   (let ((history (assoc rfcview:filter-keyword-current-keyword rfcview:filter-keywords-history)))
     (if history
         (mapcar (lambda (e) (car e)) (cdr history))
       (setq rfcview:filter-keyword-current-result nil)
-      (maphash (lambda (key value)
-                 (let* ((title (plist-get value :title))
-                        (keywords (split-string rfcview:filter-keyword-current-keyword
-                                                "\\s-+" t))
-                        (seed (if (> (length keywords) 0) (/ 40 (length keywords)) 1))
-                        score)
-                   (setq score (cond ((string-match
-                                       (concat "\\W+"
-                                               (mapconcat (lambda (s) s) keywords "\\W+")
-                                               "\\W+") title) 100)
-                                     ((string-match
-                                       (mapconcat (lambda (s) s) keywords "\\W*")  title) 80)
-                                     ((string-match
-                                       (mapconcat (lambda (s) s) keywords ".+") title) 60)
-                                     (t (let ((matched 0))
-                                          (dolist (keyword keywords)
-                                            (when (string-match (concat "\\W+" keyword "\\W+") title)
-                                              (setq matched (1+ matched))))
-                                          (* matched seed)))))
-                   (when (> score 0)
-                     (push (cons key score) rfcview:filter-keyword-current-result))))
-               (plist-get rfcview:rfc-cache :table))
+      (let* ((keywords (split-string (downcase rfcview:filter-keyword-current-keyword) "\\s-+" t))
+             (kw-patterns (mapcar (lambda (kw)
+                                    (cons kw (concat "\\(?:^\\|\\W\\)"
+                                                     (regexp-quote kw)
+                                                     "\\(?:\\W\\|$\\)")))
+                                  keywords))
+             (phrase-pat (when (> (length kw-patterns) 1)
+                           (concat "\\(?:^\\|\\W\\)"
+                                   (mapconcat (lambda (p) (regexp-quote (car p)))
+                                              kw-patterns "\\W+")
+                                   "\\(?:\\W\\|$\\)"))))
+        (maphash
+         (lambda (key value)
+           (let* ((title   (downcase (or (plist-get value :title) "")))
+                  (authors (downcase (mapconcat #'identity
+                                                (or (plist-get value :authors) '())
+                                                " ")))
+                  (status  (downcase (or (plist-get value :status) "")))
+                  (score 0))
+             ;; RFC number exact match
+             (dolist (kw keywords)
+               (when (and (string-match-p "\\`[0-9]+\\'" kw)
+                          (= key (string-to-number kw)))
+                 (setq score (+ score 500))))
+             ;; Phrase match in title
+             (when (and phrase-pat (string-match-p phrase-pat title))
+               (setq score (+ score 200)))
+             ;; All-keywords whole-word bonus
+             (let ((all-word (and kw-patterns t)))
+               (dolist (pair kw-patterns)
+                 (unless (string-match-p (cdr pair) title)
+                   (setq all-word nil)))
+               (when all-word (setq score (+ score 100))))
+             ;; Per-keyword scoring
+             (dolist (pair kw-patterns)
+               (let ((kw (car pair))
+                     (wp (cdr pair)))
+                 (cond ((string-match-p wp title)            (setq score (+ score 20)))
+                       ((string-match-p (regexp-quote kw) title) (setq score (+ score 5))))
+                 (cond ((string-match-p wp authors)          (setq score (+ score 15)))
+                       ((string-match-p (regexp-quote kw) authors) (setq score (+ score 5))))
+                 (when (string-match-p (regexp-quote kw) status)
+                   (setq score (+ score 5)))))
+             (when (> score 0)
+               (push (cons key score) rfcview:filter-keyword-current-result))))
+         (plist-get rfcview:rfc-cache :table)))
       (setq rfcview:filter-keyword-current-result
-            (sort rfcview:filter-keyword-current-result (lambda (a b)
-                                                          (or (> (cdr a) (cdr b))
-                                                              (and (= (cdr a) (cdr b))
-                                                                   (< (car a) (car b)))))))
+            (sort rfcview:filter-keyword-current-result
+                  (lambda (a b)
+                    (or (> (cdr a) (cdr b))
+                        (and (= (cdr a) (cdr b))
+                             (< (car a) (car b)))))))
       (mapcar (lambda (e) (car e)) rfcview:filter-keyword-current-result))))
 
 (defun rfcview:index-filter-function-favorite ()

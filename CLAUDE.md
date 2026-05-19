@@ -89,7 +89,7 @@ The selected entry's highlight uses three coordinated mechanisms:
 
 `rfcview:background-highlight-overlay`, `rfcview:margin-highlight-overlays`, and `rfcview:index--highlight-prev-prefixes` are buffer-local variables initialized to `nil` in `rfcview:index-mode` and torn down in `rfcview:index-cleanup`.
 
-**Filters** — `rfcview:index-filter` holds a function symbol (or `nil` for all). The three built-in filter functions (`rfcview:index-filter-function-favorite`, `rfcview:index-filter-function-recent`, `rfcview:index-filter-function-keywords`) return ordered lists of RFC numbers. Keyword search scores titles by regex matches and sorts by score descending, RFC number ascending.
+**Filters** — `rfcview:index-filter` holds a function symbol (or `nil` for all). The three built-in filter functions (`rfcview:index-filter-function-favorite`, `rfcview:index-filter-function-recent`, `rfcview:index-filter-function-keywords`) return ordered lists of RFC numbers. Keyword search is case-insensitive and searches `:title`, `:authors`, `:status`, and the RFC number. Scoring is additive: RFC-number exact match (+500), phrase in title (+200), all-keywords whole-word in title (+100), per-keyword title word-match (+20) or substring (+5), per-keyword author word-match (+15) or substring (+5), per-keyword status substring (+5). Results are sorted by score descending, RFC number ascending.
 
 ### rfcview-reader.el — RFC document read mode
 

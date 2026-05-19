@@ -393,6 +393,90 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
         (should (member 793 result))
         (should-not (member 768 result))))))
 
+(ert-deftest rfcview:test-keywords-filter-case-insensitive ()
+  "Keyword search is case-insensitive: lowercase query matches uppercase title."
+  (let* ((tbl (rfcview-test:make-table
+               '(5246 . (:title "TLS Handshake Protocol"))
+               '(768  . (:title "User Datagram Protocol"))))
+         (rfcview:rfc-cache (rfcview-test:make-cache tbl)))
+    (rfcview-test:with-keyword-filter "tls"
+      (let ((result (rfcview:index-filter-function-keywords)))
+        (should (member 5246 result))
+        (should-not (member 768 result))))))
+
+(ert-deftest rfcview:test-keywords-filter-word-boundary-at-start ()
+  "A keyword that starts the title is found (word boundary at string start)."
+  (let* ((tbl (rfcview-test:make-table
+               '(7540 . (:title "HTTP/2 Semantics"))
+               '(768  . (:title "User Datagram Protocol"))))
+         (rfcview:rfc-cache (rfcview-test:make-cache tbl)))
+    (rfcview-test:with-keyword-filter "http"
+      (let ((result (rfcview:index-filter-function-keywords)))
+        (should (member 7540 result))))))
+
+(ert-deftest rfcview:test-keywords-filter-author-search ()
+  "A keyword matching an author name but not the title is included."
+  (let* ((tbl (rfcview-test:make-table
+               '(793 . (:title "Transmission Control Protocol"
+                         :authors ("J. Postel")))
+               '(768 . (:title "User Datagram Protocol"
+                         :authors ("J. Postel")))
+               '(791 . (:title "Internet Protocol"
+                         :authors ("V. Cerf")))))
+         (rfcview:rfc-cache (rfcview-test:make-cache tbl)))
+    (rfcview-test:with-keyword-filter "postel"
+      (let ((result (rfcview:index-filter-function-keywords)))
+        (should (member 793 result))
+        (should (member 768 result))
+        (should-not (member 791 result))))))
+
+(ert-deftest rfcview:test-keywords-filter-status-search ()
+  "A keyword matching :status but not :title is included."
+  (let* ((tbl (rfcview-test:make-table
+               '(793 . (:title "Transmission Control Protocol"
+                         :status "INTERNET STANDARD"))
+               '(768 . (:title "User Datagram Protocol"
+                         :status "INFORMATIONAL"))))
+         (rfcview:rfc-cache (rfcview-test:make-cache tbl)))
+    (rfcview-test:with-keyword-filter "informational"
+      (let ((result (rfcview:index-filter-function-keywords)))
+        (should (member 768 result))
+        (should-not (member 793 result))))))
+
+(ert-deftest rfcview:test-keywords-filter-rfc-number-search ()
+  "A pure-digit keyword matching the RFC number returns that RFC."
+  (let* ((tbl (rfcview-test:make-table
+               '(822 . (:title "Standard for ARPA Internet Text Messages"))
+               '(821 . (:title "Simple Mail Transfer Protocol"))))
+         (rfcview:rfc-cache (rfcview-test:make-cache tbl)))
+    (rfcview-test:with-keyword-filter "822"
+      (let ((result (rfcview:index-filter-function-keywords)))
+        (should (member 822 result))
+        (should-not (member 821 result))))))
+
+(ert-deftest rfcview:test-keywords-filter-number-search-scores-highest ()
+  "RFC-number exact match scores higher than a title substring match of the same digits."
+  (let* ((tbl (rfcview-test:make-table
+               '(822  . (:title "Standard for ARPA Internet Text Messages"))
+               '(9822 . (:title "The 822 Format Extended"))))
+         (rfcview:rfc-cache (rfcview-test:make-cache tbl)))
+    (rfcview-test:with-keyword-filter "822"
+      (let ((result (rfcview:index-filter-function-keywords)))
+        ;; RFC 822 gets +500 (number match); RFC 9822 gets at most title scoring
+        (should (= (car result) 822))))))
+
+(ert-deftest rfcview:test-keywords-filter-phrase-bonus ()
+  "Adjacent keywords in title score higher than the same keywords in any order."
+  (let* ((tbl (rfcview-test:make-table
+               '(793  . (:title "Transmission Control Protocol"))
+               '(1234 . (:title "Control and Transmission of Data"))))
+         (rfcview:rfc-cache (rfcview-test:make-cache tbl)))
+    (rfcview-test:with-keyword-filter "Transmission Control"
+      (let ((result (rfcview:index-filter-function-keywords)))
+        ;; 793 has the phrase in order; 1234 has both words but not adjacent in order
+        (should (= (car result) 793))
+        (should (member 1234 result))))))
+
 ;;; ─── rfcview:make-entry-line ─────────────────────────────────────────────────
 
 (ert-deftest rfcview:test-make-entry-line-contains-rfc-number ()
