@@ -88,7 +88,15 @@ do not get rendered narrower than the rest of the document.")
   :group 'rfcview)
 
 (defface rfcview:read-translation-face
-  '((t (:inherit default :slant italic)))
+  '((((class color) (min-colors 88) (background dark))
+     (:foreground "light blue"))
+    (((class color) (min-colors 88) (background light))
+     (:foreground "royal blue"))
+    (((class color) (background dark))
+     (:foreground "yellow"))
+    (((class color) (background light))
+     (:foreground "blue"))
+    (t (:bold t)))
   "Face for translated paragraph text shown over the original via overlay."
   :group 'rfcview)
 
