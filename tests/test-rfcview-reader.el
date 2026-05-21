@@ -2390,5 +2390,859 @@ already pushed by the button action."
       (should (looking-at "2\\.  Protocol Details"))
       (should (null (car rfcview:nav-history))))))
 
+;;; ─── Translation: paragraph bounds ──────────────────────────────────────────
+
+(ert-deftest rfcview:test-paragraph-bounds-at-mid-paragraph ()
+  "Returns (BEG . END) when point is inside a non-blank paragraph."
+  (with-temp-buffer
+    (insert "Line 1\nLine 2\n\nNext para\n")
+    (goto-char (+ (point-min) 2))
+    (let ((bounds (rfcview:read--paragraph-bounds-at (point))))
+      (should bounds)
+      (should (= (car bounds) (point-min)))
+      (should (= (cdr bounds)
+                 (save-excursion (goto-char (point-min))
+                                 (forward-line 2)
+                                 (point)))))))
+
+(ert-deftest rfcview:test-paragraph-bounds-on-blank-line-returns-nil ()
+  "Returns nil when point is on a blank line."
+  (with-temp-buffer
+    (insert "Line 1\n\nLine 3\n")
+    (goto-char (point-min))
+    (forward-line 1)
+    (should (null (rfcview:read--paragraph-bounds-at (point))))))
+
+(ert-deftest rfcview:test-paragraph-bounds-at-bob ()
+  "Returns BEG = point-min when paragraph starts at BOB."
+  (with-temp-buffer
+    (insert "First para\n\nSecond\n")
+    (let ((bounds (rfcview:read--paragraph-bounds-at (point-min))))
+      (should bounds)
+      (should (= (car bounds) (point-min))))))
+
+(ert-deftest rfcview:test-all-paragraphs-returns-document-order-list ()
+  "Returns each paragraph in document order with strictly increasing starts."
+  (with-temp-buffer
+    (insert "P1 line\n\nP2 line\n\nP3 line\n")
+    (let ((paras (rfcview:read--all-paragraphs)))
+      (should (= 3 (length paras)))
+      (should (< (car (nth 0 paras)) (car (nth 1 paras))))
+      (should (< (car (nth 1 paras)) (car (nth 2 paras)))))))
+
+;;; ─── Translation: visible-area first ────────────────────────────────────────
+
+(ert-deftest rfcview:test-paragraphs-visible-first-orders-correctly ()
+  "Visible paragraphs come first, then after, then before."
+  (let* ((p-before  (cons 1 10))
+         (p-vis1    (cons 100 150))
+         (p-vis2    (cons 200 250))
+         (p-after   (cons 300 400))
+         (all (list p-before p-vis1 p-vis2 p-after)))
+    (cl-letf (((symbol-function 'get-buffer-window)
+               (lambda (&rest _) 'sentinel-win))
+              ((symbol-function 'window-start)
+               (lambda (&rest _) 90))
+              ((symbol-function 'window-end)
+               (lambda (&rest _) 260)))
+      (should (equal (rfcview:read--paragraphs-visible-first all)
+                     (list p-vis1 p-vis2 p-after p-before))))))
+
+;;; ─── Translation: language helpers ──────────────────────────────────────────
+
+(defconst rfcview-test:mock-language-cache
+  '(("English" . "en") ("Japanese" . "ja") ("Korean" . "ko"))
+  "Stub language-choices list used in tests that bypass network.")
+
+(ert-deftest rfcview:test-fetch-languages-parses-tl-from-google-response ()
+  "Fetched languages are built from the `tl' key of Google's JSON response."
+  (cl-letf (((symbol-function 'rfcview:retrieve)
+             (lambda (&rest _)
+               (rfcview-test:make-http-buffer
+                200
+                (concat "{\"sl\":{\"auto\":\"Detect language\","
+                        "\"ko\":\"Korean\"},"
+                        "\"tl\":{\"ko\":\"Korean\","
+                        "\"ja\":\"Japanese\","
+                        "\"auto\":\"Detect language\"}}")))))
+    (let ((langs (rfcview:translate-fetch-languages)))
+      (should (member '("Korean" . "ko") langs))
+      (should (member '("Japanese" . "ja") langs))
+      ;; The `auto' pseudo-language must be filtered out
+      (should-not (cl-find-if (lambda (p) (equal (cdr p) "auto")) langs)))))
+
+(ert-deftest rfcview:test-language-choices-fetched-from-google-translate ()
+  "Choices come from Google's API, not Emacs's language-info-alist."
+  (let ((rfcview:translate--languages-cache nil))
+    (cl-letf (((symbol-function 'rfcview:translate-fetch-languages)
+               (lambda () '(("Korean" . "ko") ("Japanese" . "ja")))))
+      (should (equal (cdr (assoc "Korean"
+                                  (rfcview:translate--language-choices)))
+                     "ko")))))
+
+(ert-deftest rfcview:test-language-choices-caches-across-calls ()
+  "Choices are fetched once and reused for subsequent calls in the session."
+  (let ((rfcview:translate--languages-cache nil)
+        (call-count 0))
+    (cl-letf (((symbol-function 'rfcview:translate-fetch-languages)
+               (lambda () (cl-incf call-count) '(("Korean" . "ko")))))
+      (rfcview:translate--language-choices)
+      (rfcview:translate--language-choices)
+      (should (= call-count 1)))))
+
+(ert-deftest rfcview:test-language-choices-signals-when-fetch-fails ()
+  "Signals a user error when the fetch returns nil and there is no cache."
+  (let ((rfcview:translate--languages-cache nil))
+    (cl-letf (((symbol-function 'rfcview:translate-fetch-languages)
+               (lambda () nil)))
+      (should-error (rfcview:translate--language-choices)
+                    :type 'user-error))))
+
+(ert-deftest rfcview:test-ensure-target-language-skips-prompt-when-set ()
+  "Returns the variable's value without prompting when it is non-nil."
+  (let ((rfcview:translate-target-language "ko"))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) (error "Should not prompt"))))
+      (should (equal (rfcview:translate--ensure-target-language) "ko")))))
+
+(ert-deftest rfcview:test-ensure-target-language-prompts-when-nil-and-persists ()
+  "Prompts, persists via customize-save-variable, and returns the code."
+  (let ((rfcview:translate-target-language nil)
+        (rfcview:translate--languages-cache rfcview-test:mock-language-cache)
+        saved)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "Korean"))
+              ((symbol-function 'customize-save-variable)
+               (lambda (sym val &rest _)
+                 (set sym val)
+                 (setq saved (cons sym val)))))
+      (let ((code (rfcview:translate--ensure-target-language)))
+        (should (equal code "ko"))
+        (should (equal saved '(rfcview:translate-target-language . "ko")))))))
+
+(ert-deftest rfcview:test-ensure-target-language-offers-environment-as-default ()
+  "Passes the Google-API name matching `current-language-environment' as default."
+  (let ((rfcview:translate-target-language nil)
+        (rfcview:translate--languages-cache rfcview-test:mock-language-cache)
+        captured-default)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll _pred _req _init _hist default)
+                 (setq captured-default default)
+                 "Korean"))
+              ((symbol-function 'customize-save-variable)
+               (lambda (&rest _) nil)))
+      (let ((current-language-environment "Korean"))
+        (rfcview:translate--ensure-target-language))
+      (should (equal captured-default "Korean")))))
+
+;;; ─── Translation: translate-fetch (sync) ────────────────────────────────────
+
+(defun rfcview-test:make-http-buffer (status body)
+  "Create a fake post-`rfcview:retrieve' response buffer with STATUS and BODY."
+  (let ((buf (generate-new-buffer " *rfcview-test-http*")))
+    (with-current-buffer buf
+      (set-buffer-multibyte t)
+      (insert (format "HTTP/1.1 %d OK\r\nContent-Type: application/json\r\n\r\n%s"
+                      status body))
+      (make-local-variable 'url-http-response-status)
+      (setq url-http-response-status status))
+    buf))
+
+(ert-deftest rfcview:test-translate-fetch-url-encodes-query-params ()
+  "Built URL includes client=gtx, sl/tl, and a URL-encoded q."
+  (let (captured-url)
+    (cl-letf (((symbol-function 'rfcview:retrieve)
+               (lambda (url &rest _)
+                 (setq captured-url url)
+                 (rfcview-test:make-http-buffer
+                  200 "[[[\"hi\",\"hello\",null,null,1]],null,\"en\"]"))))
+      (rfcview:translate-fetch "hello world" "auto" "ko")
+      (should captured-url)
+      (should (string-match-p "client=gtx" captured-url))
+      (should (string-match-p "sl=auto" captured-url))
+      (should (string-match-p "tl=ko" captured-url))
+      (should (string-match-p "q=hello%20world" captured-url)))))
+
+(ert-deftest rfcview:test-translate-fetch-parses-json-response ()
+  "Parses the translation from Google's JSON envelope."
+  (cl-letf (((symbol-function 'rfcview:retrieve)
+             (lambda (&rest _)
+               (rfcview-test:make-http-buffer
+                200 "[[[\"안녕\",\"hi\",null,null,1]],null,\"en\"]"))))
+    (should (equal (rfcview:translate-fetch "hi" "auto" "ko") "안녕"))))
+
+(ert-deftest rfcview:test-translate-fetch-multi-chunk-joins-all ()
+  "Concatenates every chunk's translation cell from outer[0]."
+  (cl-letf (((symbol-function 'rfcview:retrieve)
+             (lambda (&rest _)
+               (rfcview-test:make-http-buffer
+                200
+                "[[[\"안녕\",\"hello\",null,null,1],[\" 세상\",\" world\",null,null,1]],null,\"en\"]"))))
+    (should (equal (rfcview:translate-fetch "hello world" "auto" "ko")
+                   "안녕 세상"))))
+
+(ert-deftest rfcview:test-translate-fetch-returns-nil-on-http-error ()
+  "Returns nil when HTTP status is not 200."
+  (cl-letf (((symbol-function 'rfcview:retrieve)
+             (lambda (&rest _)
+               (rfcview-test:make-http-buffer 404 ""))))
+    (should (null (rfcview:translate-fetch "x" "auto" "ko")))))
+
+(ert-deftest rfcview:test-set-translation-language-persists-and-clears-cache ()
+  "`l' prompts, persists the new language, and clears cache + overlays."
+  (with-temp-buffer
+    (insert "Hello world.\n\nGoodbye.\n")
+    (let ((rfcview:translate-target-language "ko")
+          (rfcview:translate--languages-cache rfcview-test:mock-language-cache)
+          saved)
+      (rfcview:read--init-translation-state)
+      ;; Seed a cached translation + visible overlay
+      (puthash (cons (point-min) (1+ (length "Hello world.")))
+               "안녕"
+               rfcview:read-translation-cache)
+      (rfcview:read--show-translation
+       (point-min) (1+ (length "Hello world.")) "안녕")
+      (should (rfcview:read--any-overlay-shown-p))
+      (should (= 1 (hash-table-count rfcview:read-translation-cache)))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (&rest _) "Japanese"))
+                ((symbol-function 'customize-save-variable)
+                 (lambda (sym val &rest _)
+                   (set sym val)
+                   (setq saved (cons sym val)))))
+        (rfcview:read-set-translation-language))
+      (should (equal rfcview:translate-target-language "ja"))
+      (should (equal saved '(rfcview:translate-target-language . "ja")))
+      (should (zerop (hash-table-count rfcview:read-translation-cache)))
+      (should-not (rfcview:read--any-overlay-shown-p)))))
+
+;;; ─── Translation: t at point ────────────────────────────────────────────────
+
+(ert-deftest rfcview:test-translate-paragraph-creates-overlay-replacing-text ()
+  "Creates an overlay with a display property replacing the paragraph."
+  (with-temp-buffer
+    (insert "Hello world.\nMore text.\n\nNext paragraph.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "번역된 텍스트")))
+        (goto-char (point-min))
+        (rfcview:read-translate-at-point))
+      (should (cl-some (lambda (ov)
+                         (and (overlay-get ov 'rfcview:translation)
+                              (overlay-get ov 'display)))
+                       (overlays-in (point-min) (point-max)))))))
+
+(ert-deftest rfcview:test-translate-paragraph-original-text-still-in-buffer ()
+  "`buffer-substring-no-properties' still returns the original text."
+  (with-temp-buffer
+    (insert "Hello world.\nMore text.\n\nNext.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "번역")))
+        (goto-char (point-min))
+        (rfcview:read-translate-at-point))
+      (should (string-match-p "Hello world"
+                              (buffer-substring-no-properties
+                               (point-min) (point-max)))))))
+
+(ert-deftest rfcview:test-translate-paragraph-toggle-hides-then-shows-from-cache ()
+  "Three presses: fetch + hide + restore-from-cache → exactly one HTTP call."
+  (with-temp-buffer
+    (insert "Hello world.\n\n")
+    (let ((rfcview:translate-target-language "ko")
+          (fetch-count 0))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) (cl-incf fetch-count) "번역")))
+        (goto-char (point-min))
+        (rfcview:read-translate-at-point)
+        (rfcview:read-translate-at-point)
+        (rfcview:read-translate-at-point)
+        (should (= fetch-count 1))))))
+
+(ert-deftest rfcview:test-translate-region-uses-region-bounds-not-paragraph ()
+  "When a region is active, the marked range (not the paragraph) is translated."
+  (with-temp-buffer
+    (insert "Hello world.\n\nNext.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "X")))
+        (let ((beg 2) (end 6))
+          (cl-letf (((symbol-function 'use-region-p) (lambda () t))
+                    ((symbol-function 'region-beginning) (lambda () beg))
+                    ((symbol-function 'region-end) (lambda () end))
+                    ((symbol-function 'deactivate-mark) (lambda (&rest _) nil)))
+            (rfcview:read-translate-at-point))
+          (should (gethash (cons beg end) rfcview:read-translation-cache)))))))
+
+(ert-deftest rfcview:test-translate-at-point-moves-point-to-paragraph-end ()
+  "Point lands at the end of the paragraph (BOL of blank line) after `t'."
+  (with-temp-buffer
+    (insert "First line.\nSecond line.\nThird line.\n\nNext paragraph.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "번역")))
+        ;; Point in the middle of the first paragraph
+        (goto-char (+ (point-min) 15))
+        (let* ((bounds (rfcview:read--paragraph-bounds-at (point)))
+               (end (cdr bounds)))
+          (rfcview:read-translate-at-point)
+          (should (= (point) end)))))))
+
+(ert-deftest rfcview:test-translate-at-point-preserves-window-start ()
+  "`window-start' is preserved across `t' so the buffer does not scroll."
+  (with-temp-buffer
+    (let ((buf (current-buffer)))
+      (insert (mapconcat #'identity
+                         (cl-loop for i from 1 to 60
+                                  collect (format "Line %d of content." i))
+                         "\n"))
+      (insert "\n\nNext paragraph.\n")
+      (let ((rfcview:translate-target-language "ko"))
+        (rfcview:read--init-translation-state)
+        (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                   (lambda (&rest _) "번역")))
+          (save-window-excursion
+            (set-window-buffer (selected-window) buf)
+            ;; Scroll so the start of the first paragraph isn't at BOB
+            (goto-char (point-min))
+            (forward-line 20)
+            (set-window-start (selected-window) (point))
+            (let ((ws-before (window-start)))
+              (forward-line 5)
+              (rfcview:read-translate-at-point)
+              (should (= (window-start) ws-before)))))))))
+
+(ert-deftest rfcview:test-translate-at-point-on-blank-line-hides-single ()
+  "Pressing `t' on a blank line while in SINGLE mode hides the single overlay."
+  (with-temp-buffer
+    (insert "First line.\n\nSecond paragraph.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "번역")))
+        (goto-char (point-min))
+        (rfcview:read-translate-at-point)
+        (should (eq rfcview:read--translation-mode 'single))
+        ;; Point was moved to the blank line by the show step
+        (should (looking-at-p "^[ \t]*$"))
+        (rfcview:read-translate-at-point)
+        (should-not rfcview:read--translation-mode)
+        (let (vals)
+          (maphash (lambda (_k v) (push v vals))
+                   rfcview:read-translation-overlays)
+          (should (zerop (cl-count-if #'overlayp vals))))))))
+
+(ert-deftest rfcview:test-translate-at-point-on-blank-line-noop-when-idle ()
+  "Pressing `t' on a blank line while idle is a no-op (no state change)."
+  (with-temp-buffer
+    (insert "First line.\n\nSecond.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      ;; Move to the blank line between paragraphs
+      (goto-char (point-min))
+      (forward-line 1)
+      (should (looking-at-p "^[ \t]*$"))
+      (rfcview:read-translate-at-point)
+      (should-not rfcview:read--translation-mode)
+      (should-not rfcview:read--translation-single-key))))
+
+(ert-deftest rfcview:test-translate-toggle-off-keeps-point ()
+  "Toggling off (same paragraph) does not relocate point."
+  (with-temp-buffer
+    (insert "First line.\nSecond line.\n\nNext.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "번역")))
+        (goto-char (point-min))
+        (rfcview:read-translate-at-point) ; shows; point moved to end
+        (let ((pos-after-show (point)))
+          (rfcview:read-translate-at-point) ; hides
+          ;; Toggle-off leaves point alone — still at the post-show position
+          (should (= (point) pos-after-show)))))))
+
+(ert-deftest rfcview:test-t-on-different-paragraph-restores-previous ()
+  "Pressing `t' in paragraph B restores paragraph A to English."
+  (with-temp-buffer
+    (insert "Para A.\n\nPara B.\n\nPara C.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (text &rest _) (concat "T:" text))))
+        ;; Translate A
+        (goto-char (point-min))
+        (rfcview:read-translate-at-point)
+        (let* ((paras (rfcview:read--all-paragraphs))
+               (key-a (nth 0 paras))
+               (key-b (nth 1 paras)))
+          (should (overlayp (gethash key-a
+                                     rfcview:read-translation-overlays)))
+          (should (equal rfcview:read--translation-single-key key-a))
+          ;; Move to B and translate
+          (goto-char (car key-b))
+          (rfcview:read-translate-at-point)
+          ;; A's overlay hidden, B's shown
+          (should-not (overlayp (gethash key-a
+                                         rfcview:read-translation-overlays)))
+          (should (overlayp (gethash key-b
+                                     rfcview:read-translation-overlays)))
+          (should (equal rfcview:read--translation-single-key key-b))
+          ;; A's translation kept in cache
+          (should (gethash key-a rfcview:read-translation-cache)))))))
+
+(ert-deftest rfcview:test-T-after-t-absorbs-single-and-translates-rest ()
+  "Pressing `T' after `t' keeps the single overlay visible and translates the rest.
+The single-key tracking is cleared (mode becomes `all')."
+  (with-temp-buffer
+    (insert "Para A.\n\nPara B.\n\nPara C.\n")
+    (let ((rfcview:translate-target-language "ko")
+          (fetch-count 0))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (text &rest _) (cl-incf fetch-count) (concat "T:" text)))
+                ((symbol-function 'rfcview:translate-fetch-async)
+                 (lambda (text _src _tgt cb)
+                   (cl-incf fetch-count)
+                   (funcall cb (concat "T:" text))
+                   nil)))
+        (goto-char (point-min))
+        (rfcview:read-translate-at-point)
+        (should (eq rfcview:read--translation-mode 'single))
+        (rfcview:read-translate-document)
+        ;; Mode flipped to 'all, single-key cleared
+        (should (eq rfcview:read--translation-mode 'all))
+        (should (null rfcview:read--translation-single-key))
+        ;; All three paragraphs have visible overlays
+        (let ((shown 0))
+          (maphash (lambda (_k v) (when (overlayp v) (cl-incf shown)))
+                   rfcview:read-translation-overlays)
+          (should (= shown 3)))
+        ;; Exactly one sync call (t) + two async calls (T fetched B and C)
+        (should (= fetch-count 3))))))
+
+(ert-deftest rfcview:test-t-during-T-shown-replaces-overlays-with-single ()
+  "Pressing `t' while in ALL_SHOWN exits T-mode and shows only point's overlay."
+  (with-temp-buffer
+    (insert "Para A.\n\nPara B.\n\nPara C.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (text &rest _) (concat "T:" text)))
+                ((symbol-function 'rfcview:translate-fetch-async)
+                 (lambda (text _src _tgt cb)
+                   (funcall cb (concat "T:" text))
+                   nil)))
+        (rfcview:read-translate-document)
+        (should (eq rfcview:read--translation-mode 'all))
+        ;; Move to middle paragraph and press t
+        (let* ((paras (rfcview:read--all-paragraphs))
+               (key-b (nth 1 paras)))
+          (goto-char (car key-b))
+          (rfcview:read-translate-at-point)
+          (should (eq rfcview:read--translation-mode 'single))
+          (should (equal rfcview:read--translation-single-key key-b))
+          ;; Only B's overlay is visible
+          (let ((shown 0))
+            (maphash (lambda (_k v) (when (overlayp v) (cl-incf shown)))
+                     rfcview:read-translation-overlays)
+            (should (= shown 1))))))))
+
+(ert-deftest rfcview:test-t-during-running-cancels-job-and-shows-point ()
+  "Pressing `t' while a `T' job is in flight cancels the job and translates point."
+  (with-temp-buffer
+    (insert "Para A.\n\nPara B.\n\nPara C.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (text &rest _) (concat "T:" text)))
+                ((symbol-function 'rfcview:translate-fetch-async)
+                 (lambda (_text _src _tgt _cb)
+                   (generate-new-buffer " *rfcview-test-url*"))))
+        (rfcview:read-translate-document)
+        (should (eq (rfcview:read--translation-state) 'running))
+        (goto-char (point-min))
+        (rfcview:read-translate-at-point)
+        (should-not rfcview:read-translation-job)
+        (should (eq rfcview:read--translation-mode 'single))
+        (let* ((paras (rfcview:read--all-paragraphs))
+               (key-a (nth 0 paras)))
+          (should (overlayp (gethash key-a
+                                     rfcview:read-translation-overlays))))))))
+
+;;; ─── Translation: T whole document ──────────────────────────────────────────
+
+(ert-deftest rfcview:test-translate-document-translates-every-paragraph ()
+  "Issues one async fetch per paragraph; populates the cache for all."
+  (with-temp-buffer
+    (insert "Para one.\n\nPara two.\n\nPara three.\n")
+    (let ((rfcview:translate-target-language "ko")
+          (fetch-count 0))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch-async)
+                 (lambda (text _src _tgt cb)
+                   (cl-incf fetch-count)
+                   (funcall cb (concat "T:" (substring text 0 3)))
+                   nil)))
+        (rfcview:read-translate-document)
+        (should (= fetch-count 3))
+        (should (= 3 (hash-table-count
+                      rfcview:read-translation-cache)))))))
+
+(ert-deftest rfcview:test-translate-document-second-press-after-complete-hides-all ()
+  "After completion, T hides every overlay but preserves the cache."
+  (with-temp-buffer
+    (insert "Para one.\n\nPara two.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch-async)
+                 (lambda (_text _src _tgt cb)
+                   (funcall cb "번역")
+                   nil)))
+        (rfcview:read-translate-document))
+      (should (rfcview:read--any-overlay-shown-p))
+      (rfcview:read-translate-document)
+      (should-not (rfcview:read--any-overlay-shown-p))
+      (should (= 2 (hash-table-count
+                    rfcview:read-translation-cache))))))
+
+(ert-deftest rfcview:test-translate-document-third-press-shows-from-cache-no-http ()
+  "Show → hide → show: only the first show calls the fetcher."
+  (with-temp-buffer
+    (insert "Para one.\n\nPara two.\n")
+    (let ((rfcview:translate-target-language "ko")
+          (fetch-count 0))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch-async)
+                 (lambda (_text _src _tgt cb)
+                   (cl-incf fetch-count)
+                   (funcall cb "번역")
+                   nil)))
+        (rfcview:read-translate-document)
+        (rfcview:read-translate-document)
+        (rfcview:read-translate-document))
+      (should (= fetch-count 2)))))
+
+(ert-deftest rfcview:test-collapse-text-replaces-newlines-and-runs ()
+  "Every whitespace run (including newlines) collapses to one space."
+  (should (equal (rfcview:read--collapse-text "   foo\n   bar\t\tbaz\n")
+                 "foo bar baz"))
+  (should (equal (rfcview:read--collapse-text "  ") "")))
+
+(ert-deftest rfcview:test-doc-content-width-matches-widest-line-in-buffer ()
+  "Document content width equals the widest line anywhere in the buffer."
+  (with-temp-buffer
+    (insert "short.\n\nthis is the widest line in the entire document.\n\ntiny.\n")
+    (should (= (rfcview:read--doc-content-width)
+               (length "this is the widest line in the entire document.")))))
+
+(ert-deftest rfcview:test-wrap-translation-uses-doc-width-floor-for-short-paragraph ()
+  "Short paragraphs wrap to at least the document-wide width."
+  (with-temp-buffer
+    (insert "Short.\n\nthis is the widest line in the entire document body here.\n")
+    (let* ((bounds (rfcview:read--paragraph-bounds-at (point-min)))
+           (text (make-string 200 ?x))
+           (display (rfcview:read--wrap-translation (car bounds) (cdr bounds) text))
+           (lines (split-string display "\n")))
+      ;; The wrap target was widened by the document floor, so the longest
+      ;; rendered line should reach the document's widest column.
+      (should (>= (apply #'max (mapcar #'string-width lines))
+                  (rfcview:read--doc-content-width))))))
+
+(ert-deftest rfcview:test-paragraph-target-width-matches-widest-line ()
+  "Target width equals the column reached by the longest line."
+  (with-temp-buffer
+    (insert "   short.\n   somewhat longer line here.\n")
+    (should (= (rfcview:read--paragraph-target-width (point-min) (point-max))
+               (length "   somewhat longer line here.")))))
+
+(ert-deftest rfcview:test-translate-paragraph-collapses-whitespace-before-fetch ()
+  "Multi-line paragraphs are flattened before being sent to the translator."
+  (with-temp-buffer
+    (insert "   First line of paragraph.\n   Second line follows.\n\nNext.\n")
+    (let ((rfcview:translate-target-language "ko")
+          captured)
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (text &rest _)
+                   (setq captured text)
+                   "번역")))
+        (goto-char (point-min))
+        (rfcview:read-translate-at-point))
+      (should captured)
+      (should-not (string-match-p "\n" captured))
+      (should-not (string-match-p "  " captured))
+      (should (equal captured "First line of paragraph. Second line follows.")))))
+
+(ert-deftest rfcview:test-translate-paragraph-display-ends-with-newline-when-paragraph-does ()
+  "Display string ends in \\n when the paragraph range ends in \\n.
+This preserves the blank-line separator to the next paragraph."
+  (with-temp-buffer
+    (insert "Hello world.\n\nNext paragraph.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "번역")))
+        (goto-char (point-min))
+        (rfcview:read-translate-at-point))
+      (let ((ov (cl-find-if (lambda (o) (overlay-get o 'rfcview:translation))
+                            (overlays-in (point-min) (point-max)))))
+        (should ov)
+        (should (string-suffix-p "\n" (overlay-get ov 'display)))))))
+
+(ert-deftest rfcview:test-translate-region-no-trailing-newline-when-range-doesnt-end-in-nl ()
+  "A marked region not ending in \\n produces a display string without \\n."
+  (with-temp-buffer
+    (insert "Hello world.\n\nNext.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "번역"))
+                ((symbol-function 'use-region-p) (lambda () t))
+                ((symbol-function 'region-beginning) (lambda () 2))
+                ((symbol-function 'region-end) (lambda () 6))
+                ((symbol-function 'deactivate-mark) (lambda (&rest _) nil)))
+        (rfcview:read-translate-at-point))
+      (let ((ov (cl-find-if (lambda (o) (overlay-get o 'rfcview:translation))
+                            (overlays-in (point-min) (point-max)))))
+        (should ov)
+        (should-not (string-suffix-p "\n" (overlay-get ov 'display)))))))
+
+;;; ─── Translation: region-overlay dispatch ──────────────────────────────────
+
+(defmacro rfcview-test:with-mocked-region (beg end &rest body)
+  "Run BODY with an active region from BEG to END (functions mocked)."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'use-region-p) (lambda () t))
+             ((symbol-function 'region-beginning) (lambda () ,beg))
+             ((symbol-function 'region-end) (lambda () ,end))
+             ((symbol-function 'deactivate-mark) (lambda (&rest _) nil)))
+     ,@body))
+
+(ert-deftest rfcview:test-region-translate-creates-region-overlay-table ()
+  "Region t puts the overlay into `--region-overlays', not the SINGLE table."
+  (with-temp-buffer
+    (insert "Hello world.\n\nNext.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "번역")))
+        (rfcview-test:with-mocked-region 2 6
+          (rfcview:read-translate-at-point))
+        (should (overlayp (gethash (cons 2 6) rfcview:read--region-overlays)))
+        (should-not (gethash (cons 2 6) rfcview:read-translation-overlays))))))
+
+(ert-deftest rfcview:test-region-translate-does-not-touch-single-state ()
+  "Region t leaves SINGLE mode and its overlay alone."
+  (with-temp-buffer
+    (insert "First paragraph.\nLine two.\n\nSecond paragraph.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "번역")))
+        ;; Translate the first paragraph as SINGLE
+        (goto-char (point-min))
+        (rfcview:read-translate-at-point)
+        (should (eq rfcview:read--translation-mode 'single))
+        (let ((single-key rfcview:read--translation-single-key))
+          ;; Now translate an unrelated region — SINGLE must stay
+          (rfcview-test:with-mocked-region 30 36
+            (rfcview:read-translate-at-point))
+          (should (eq rfcview:read--translation-mode 'single))
+          (should (equal rfcview:read--translation-single-key single-key))
+          (should (overlayp
+                   (gethash single-key rfcview:read-translation-overlays)))
+          (should (overlayp
+                   (gethash (cons 30 36) rfcview:read--region-overlays))))))))
+
+(ert-deftest rfcview:test-t-anywhere-hides-region-overlay ()
+  "Pressing `t' at any position when a region overlay is visible hides it.
+SINGLE state is preserved across the hide."
+  (with-temp-buffer
+    (insert "First paragraph.\nLine two.\n\nSecond paragraph.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "번역")))
+        ;; SINGLE on first paragraph + region overlay
+        (goto-char (point-min))
+        (rfcview:read-translate-at-point)
+        (rfcview-test:with-mocked-region 30 36
+          (rfcview:read-translate-at-point))
+        (should (rfcview:read--any-region-overlay-p))
+        ;; Press t without a region, anywhere — region overlay must hide
+        (goto-char (point-max))
+        (rfcview:read-translate-at-point)
+        (should-not (rfcview:read--any-region-overlay-p))
+        ;; SINGLE is still alive
+        (should (eq rfcview:read--translation-mode 'single))))))
+
+(ert-deftest rfcview:test-region-translate-reuses-cache-on-second-mark ()
+  "Re-marking the same range and pressing `t' restores from cache."
+  (with-temp-buffer
+    (insert "Hello world.\n\nNext.\n")
+    (let ((rfcview:translate-target-language "ko")
+          (fetch-count 0))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _)
+                   (cl-incf fetch-count)
+                   "번역")))
+        (rfcview-test:with-mocked-region 2 6
+          (rfcview:read-translate-at-point))
+        ;; Hide it (t anywhere)
+        (rfcview:read-translate-at-point)
+        (should-not (rfcview:read--any-region-overlay-p))
+        ;; Mark again, press t — must be cached
+        (rfcview-test:with-mocked-region 2 6
+          (rfcview:read-translate-at-point))
+        (should (= fetch-count 1))
+        (should (rfcview:read--any-region-overlay-p))))))
+
+(ert-deftest rfcview:test-paragraph-chunks-in-range-single-paragraph ()
+  "A range entirely within one paragraph yields one chunk."
+  (with-temp-buffer
+    (insert "Hello world.\nMore text.\n\nNext.\n")
+    (let ((chunks (rfcview:read--paragraph-chunks-in-range 2 12)))
+      (should (= 1 (length chunks)))
+      (should (equal (car chunks) (cons 2 12))))))
+
+(ert-deftest rfcview:test-paragraph-chunks-in-range-spanning-blank-line ()
+  "A range crossing a blank line yields two chunks split at the blank."
+  (with-temp-buffer
+    (insert "First A.\nSecond A.\n\nFirst B.\nSecond B.\n")
+    ;; Range covers the whole buffer
+    (let ((chunks (rfcview:read--paragraph-chunks-in-range
+                   (point-min) (point-max))))
+      (should (= 2 (length chunks)))
+      ;; First chunk ends before the blank line
+      (let ((first (nth 0 chunks))
+            (second (nth 1 chunks)))
+        (should (< (cdr first) (car second)))
+        ;; The blank line BOL sits between the two chunks
+        (should (string-match-p
+                 "^[ \t]*$"
+                 (buffer-substring-no-properties (cdr first)
+                                                 (car second))))))))
+
+(ert-deftest rfcview:test-region-translate-multi-paragraph-creates-multiple-overlays ()
+  "Region spanning N paragraphs produces N independent overlays."
+  (with-temp-buffer
+    (insert "Para one.\n\nPara two.\n\nPara three.\n")
+    (let ((rfcview:translate-target-language "ko")
+          (fetch-count 0))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (text &rest _) (cl-incf fetch-count) (concat "T:" text))))
+        ;; Select the whole buffer as one region
+        (rfcview-test:with-mocked-region (point-min) (point-max)
+          (rfcview:read-translate-at-point))
+        ;; Three paragraphs → three fetches → three overlays
+        (should (= fetch-count 3))
+        (let ((live 0))
+          (maphash (lambda (_k v) (when (overlayp v) (cl-incf live)))
+                   rfcview:read--region-overlays)
+          (should (= live 3)))))))
+
+(ert-deftest rfcview:test-region-translate-multi-paragraph-preserves-blank-line ()
+  "Blank line between paragraphs is not covered by any region overlay."
+  (with-temp-buffer
+    (insert "Para A.\n\nPara B.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "번역")))
+        (rfcview-test:with-mocked-region (point-min) (point-max)
+          (rfcview:read-translate-at-point))
+        ;; Find the blank line position
+        (let ((blank-bol
+               (save-excursion
+                 (goto-char (point-min))
+                 (re-search-forward "^[ \t]*$")
+                 (line-beginning-position))))
+          (let ((covered nil))
+            (maphash (lambda (k _v)
+                       (when (and (<= (car k) blank-bol)
+                                  (> (cdr k) blank-bol))
+                         (setq covered t)))
+                     rfcview:read--region-overlays)
+            (should-not covered)))))))
+
+(ert-deftest rfcview:test-set-language-clears-region-overlays ()
+  "`l' wipes region overlays along with paragraph overlays and cache."
+  (with-temp-buffer
+    (insert "Hello world.\n\nNext.\n")
+    (let ((rfcview:translate-target-language "ko")
+          (rfcview:translate--languages-cache rfcview-test:mock-language-cache))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "번역")))
+        (rfcview-test:with-mocked-region 2 6
+          (rfcview:read-translate-at-point)))
+      (should (rfcview:read--any-region-overlay-p))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (&rest _) "Japanese"))
+                ((symbol-function 'customize-save-variable)
+                 (lambda (&rest _) nil)))
+        (rfcview:read-set-translation-language))
+      (should-not (rfcview:read--any-region-overlay-p))
+      (should (zerop (hash-table-count rfcview:read-translation-cache))))))
+
+(ert-deftest rfcview:test-wrap-translation-applies-slack ()
+  "Effective wrap target is the measured width plus the slack constant."
+  (with-temp-buffer
+    (insert "12345678901234567890\n12345678\n")
+    (let* ((text (mapconcat #'identity (make-list 30 "abc") " "))
+           (out (rfcview:read--wrap-translation
+                 (point-min) (point-max) text))
+           (lines (split-string out "\n" t)))
+      ;; Without slack, lines would cap at the doc width (20).  The slack
+      ;; constant lets at least one line extend beyond that.
+      (should (cl-some (lambda (l) (> (string-width l) 20)) lines)))))
+
+(ert-deftest rfcview:test-translate-paragraph-display-preserves-indent ()
+  "The first character of the overlay's display string matches the original indent."
+  (with-temp-buffer
+    (insert "   indented paragraph here.\n   on multiple lines.\n\nNext.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      (cl-letf (((symbol-function 'rfcview:translate-fetch)
+                 (lambda (&rest _) "번역")))
+        (goto-char (point-min))
+        (rfcview:read-translate-at-point))
+      (let ((ov (cl-find-if (lambda (o) (overlay-get o 'rfcview:translation))
+                            (overlays-in (point-min) (point-max)))))
+        (should ov)
+        (let ((display (overlay-get ov 'display)))
+          (should (stringp display))
+          (should (string-match-p "\\`   " display)))))))
+
+(ert-deftest rfcview:test-wrap-translation-text-respects-max-width ()
+  "Wrapped lines never exceed MAX-WIDTH columns of display width."
+  (let* ((text "one two three four five six seven eight nine ten")
+         (out (rfcview:read--wrap-translation-text text 2 12)))
+    (dolist (line (split-string out "\n"))
+      (should (<= (string-width line) 12)))))
+
+(ert-deftest rfcview:test-translate-document-cancel-during-job-aborts-and-hides ()
+  "Pressing T while a job is in flight clears the job and hides overlays."
+  (with-temp-buffer
+    (insert "Para one.\n\nPara two.\n\nPara three.\n")
+    (let ((rfcview:translate-target-language "ko"))
+      (rfcview:read--init-translation-state)
+      ;; Mock async fetch to never invoke its callback — job stays in flight.
+      (cl-letf (((symbol-function 'rfcview:translate-fetch-async)
+                 (lambda (_text _src _tgt _cb)
+                   (generate-new-buffer " *rfcview-test-url*"))))
+        (rfcview:read-translate-document)
+        (should rfcview:read-translation-job)
+        (rfcview:read-translate-document)
+        (should-not rfcview:read-translation-job)
+        (should-not (rfcview:read--any-overlay-shown-p))))))
+
 (provide 'test-rfcview-reader)
 ;;; test-rfcview-reader.el ends here

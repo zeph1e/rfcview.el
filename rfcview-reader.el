@@ -24,6 +24,41 @@ and consumed by `rfcview:read-buttonize-toc'.")
   "Hash mapping normalized heading-title strings to heading position markers.
 Fallback lookup for TOC entries without a section number.")
 
+(defvar-local rfcview:read-translation-cache nil
+  "Hash table mapping `(BEG . END)' cons keys to translated strings.
+Populated by `rfcview:read-translate-at-point' and
+`rfcview:read-translate-document'; preserved across show/hide toggles.")
+
+(defvar-local rfcview:read-translation-overlays nil
+  "Hash table mapping `(BEG . END)' cons keys to translation overlays.
+Value is the live overlay when the translation is showing, nil when it
+has been hidden.")
+
+(defvar-local rfcview:read-translation-job nil
+  "Plist describing the running whole-document translation job, or nil.
+Slots: :url-buffer, :remaining, :total, :done, :cancelled.")
+
+(defvar-local rfcview:read--translation-mode nil
+  "Translation mode owner: nil (idle), `single' (via `t'), or `all' (via `T').
+`t' and `T' are mutually exclusive — each transition between them either
+absorbs the previous overlay set (single→all) or wipes it (all→single).")
+
+(defvar-local rfcview:read--translation-single-key nil
+  "When `rfcview:read--translation-mode' is `single', the `(BEG . END)' key
+of the currently-translated unit.  Otherwise nil.")
+
+(defvar-local rfcview:read--region-overlays nil
+  "Hash table mapping `(BEG . END)' keys to region-translation overlays.
+Independent of `rfcview:read--translation-mode' — region translations
+are additive (they do not displace the SINGLE/ALL paragraph state) and
+take priority on the next `t' press: when any region overlay is visible,
+`t' hides them all instead of running the paragraph dispatch.")
+
+(defvar-local rfcview:read--doc-content-width nil
+  "Cached widest column reached by any line in the buffer.
+Used as a floor for translation overlay wrap width so short paragraphs
+do not get rendered narrower than the rest of the document.")
+
 (defface rfcview:read-rfc-header-face
   '((((class color) (min-colors 88) (background dark))
      (:foreground "dim grey"))
@@ -50,6 +85,11 @@ Fallback lookup for TOC entries without a section number.")
 (defface rfcview:read-toc-leader-face
   '((t (:inherit shadow)))
   "Face for the dot-leader and trailing page number in TOC entries."
+  :group 'rfcview)
+
+(defface rfcview:read-translation-face
+  '((t (:inherit default :slant italic)))
+  "Face for translated paragraph text shown over the original via overlay."
   :group 'rfcview)
 
 (defconst rfcview:section-heading-regexp
@@ -170,6 +210,11 @@ it locally.")
     (define-key map (kbd "RET") 'push-button)
 
     (define-key map (kbd "o") 'rfcview:read-view-original)
+
+    ;; translation
+    (define-key map (kbd "t") 'rfcview:read-translate-at-point)
+    (define-key map (kbd "T") 'rfcview:read-translate-document)
+    (define-key map (kbd "l") 'rfcview:read-set-translation-language)
 
     (define-key map (kbd "?") 'rfcview:read-show-help)
     (define-key map (kbd "q") 'rfcview:read-quit)
@@ -861,6 +906,590 @@ are restyled too, not just the ones present at mode-setup time."
       (overlay-put ov 'help-echo "mouse-1, RET: follow URL")
       (overlay-put ov 'mouse-face 'rfcview:mouse-face))))
 
+;; ─── Translation overlays ──────────────────────────────────────────────────
+
+(defun rfcview:read--init-translation-state ()
+  "Initialize buffer-local translation state."
+  (setq rfcview:read-translation-cache (make-hash-table :test 'equal)
+        rfcview:read-translation-overlays (make-hash-table :test 'equal)
+        rfcview:read--region-overlays (make-hash-table :test 'equal)
+        rfcview:read-translation-job nil
+        rfcview:read--translation-mode nil
+        rfcview:read--translation-single-key nil))
+
+(defun rfcview:read--translation-state ()
+  "Return the current translation state as a symbol.
+One of `idle', `single', `running', `all-shown', `all-hidden'."
+  (cond
+   (rfcview:read-translation-job 'running)
+   ((eq rfcview:read--translation-mode 'single) 'single)
+   ((eq rfcview:read--translation-mode 'all)
+    (if (rfcview:read--any-overlay-shown-p) 'all-shown 'all-hidden))
+   (t 'idle)))
+
+(defun rfcview:read--paragraph-bounds-at (pos)
+  "Return (BEG . END) of the paragraph containing POS, or nil if blank.
+BEG is the BOL of the paragraph's first non-blank line; END is the BOL
+of the next blank line (or point-max)."
+  (save-excursion
+    (goto-char pos)
+    (beginning-of-line)
+    (if (looking-at-p "^[ \t]*$")
+        nil
+      (let (beg end)
+        (save-excursion
+          (if (re-search-backward "^[ \t]*$" nil t)
+              (progn (forward-line 1) (setq beg (point)))
+            (setq beg (point-min))))
+        (save-excursion
+          (forward-line 1)
+          (if (re-search-forward "^[ \t]*$" nil t)
+              (setq end (line-beginning-position))
+            (setq end (point-max))))
+        (cons beg end)))))
+
+(defun rfcview:read--all-paragraphs ()
+  "Return a list of (BEG . END) for every paragraph in document order."
+  (let (result)
+    (save-excursion
+      (goto-char (point-min))
+      (while (not (eobp))
+        (while (and (not (eobp)) (looking-at-p "^[ \t]*$"))
+          (forward-line 1))
+        (when (not (eobp))
+          (let ((beg (point)))
+            (while (and (not (eobp)) (not (looking-at-p "^[ \t]*$")))
+              (forward-line 1))
+            (push (cons beg (point)) result)))))
+    (nreverse result)))
+
+(defun rfcview:read--paragraphs-visible-first (paragraphs)
+  "Reorder PARAGRAPHS so visible ones come first, then after, then before.
+The visible region is `(window-start)' to `(window-end nil t)' of the
+selected window.  In batch tests where no window is showing the buffer,
+returns PARAGRAPHS unchanged."
+  (let* ((win (get-buffer-window (current-buffer)))
+         (ws (and win (window-start win)))
+         (we (and win (window-end win t))))
+    (if (not (and ws we))
+        paragraphs
+      (let (visible after before)
+        (dolist (p paragraphs)
+          (let ((b (car p))
+                (e (cdr p)))
+            (cond
+             ((and (< b we) (> e ws)) (push p visible))
+             ((>= b we)               (push p after))
+             (t                       (push p before)))))
+        (append (nreverse visible) (nreverse after) (nreverse before))))))
+
+(defun rfcview:read--paragraph-indent (beg)
+  "Return the count of leading spaces/tabs of the paragraph starting at BEG."
+  (save-excursion
+    (goto-char beg)
+    (skip-chars-forward " \t")
+    (- (point) beg)))
+
+(defun rfcview:read--paragraph-target-width (beg end)
+  "Return the maximum column reached by any line in the BEG..END paragraph.
+Used to match the translated overlay's wrap width to the original's."
+  (save-excursion
+    (goto-char beg)
+    (let ((max-col 0))
+      (while (< (point) end)
+        (end-of-line)
+        (setq max-col (max max-col (current-column)))
+        (forward-line 1))
+      max-col)))
+
+(defun rfcview:read--doc-content-width ()
+  "Return the widest column reached anywhere in the buffer (cached).
+Computed once per buffer and reused on every translation render."
+  (or rfcview:read--doc-content-width
+      (setq rfcview:read--doc-content-width
+            (save-excursion
+              (goto-char (point-min))
+              (let ((mx 0))
+                (while (not (eobp))
+                  (end-of-line)
+                  (setq mx (max mx (current-column)))
+                  (forward-line 1))
+                mx)))))
+
+(defun rfcview:read--collapse-text (text)
+  "Collapse every run of whitespace in TEXT (including newlines) to one space.
+Leading and trailing whitespace are trimmed.  RFC text is hard-wrapped
+with newlines and per-line indentation; sending it to Google Translate
+as-is confuses the segmentation, so this normalisation runs first."
+  (string-trim (replace-regexp-in-string "[ \t\n\r\v\f]+" " " text)))
+
+(defun rfcview:read--wrap-translation-text (text indent max-width)
+  "Wrap TEXT to MAX-WIDTH columns, using INDENT spaces as continuation prefix.
+Uses `string-width' so CJK characters take their actual display width."
+  (let* ((words (split-string text "[ \t]+" t))
+         (sep (concat "\n" (make-string indent ?\s)))
+         lines line (col indent))
+    (dolist (w words)
+      (let ((ww (string-width w)))
+        (cond
+         ((null line)
+          (setq line (list w)
+                col (+ indent ww)))
+         ((<= (+ col 1 ww) max-width)
+          (push w line)
+          (setq col (+ col 1 ww)))
+         (t
+          (push (mapconcat #'identity (nreverse line) " ") lines)
+          (setq line (list w)
+                col (+ indent ww))))))
+    (when line
+      (push (mapconcat #'identity (nreverse line) " ") lines))
+    (mapconcat #'identity (nreverse lines) sep)))
+
+(defconst rfcview:read--translation-wrap-slack 4
+  "Extra columns added to the wrap target for translation overlays.
+Word-boundary wrapping ends each line 0..N columns short of the target
+where N is the next word's display width.  CJK words are wider than
+Latin words on average, so without slack the translated lines visibly
+end further left than the original.  4 columns is a heuristic compromise
+that makes typical Korean/Japanese output align with the original's
+right margin.")
+
+(defun rfcview:read--wrap-translation (beg end text)
+  "Wrap TEXT to match the BEG..END paragraph's indent and column width.
+The wrap width is the larger of the paragraph's own widest line and the
+document's overall widest line, plus `rfcview:read--translation-wrap-slack'
+columns of slack so word-boundary wrapping of CJK text lands at the
+original's right margin instead of well inside it.  A trailing newline
+is appended when the original range ends in one, so the blank-line
+separator to the next paragraph is preserved."
+  (let* ((indent (rfcview:read--paragraph-indent beg))
+         (paragraph (rfcview:read--paragraph-target-width beg end))
+         (doc (rfcview:read--doc-content-width))
+         (max-width (+ rfcview:read--translation-wrap-slack
+                       (max (+ indent 20) paragraph doc)))
+         (wrapped (rfcview:read--wrap-translation-text text indent max-width))
+         (trailing (if (and (> end beg)
+                            (eq (char-before end) ?\n))
+                       "\n"
+                     "")))
+    (concat (make-string indent ?\s) wrapped trailing)))
+
+(defun rfcview:read--show-translation (beg end translation)
+  "Create or restore the overlay that visually replaces BEG..END with TRANSLATION.
+The original buffer text is not modified; only the display is replaced."
+  (let* ((key (cons beg end))
+         (existing (gethash key rfcview:read-translation-overlays)))
+    (when (overlayp existing) (delete-overlay existing))
+    (let* ((display-text (rfcview:read--wrap-translation beg end translation))
+           (faced (propertize display-text 'face 'rfcview:read-translation-face))
+           (ov (make-overlay beg end)))
+      (overlay-put ov 'display faced)
+      (overlay-put ov 'evaporate t)
+      (overlay-put ov 'rfcview:translation t)
+      (puthash key ov rfcview:read-translation-overlays)
+      ov)))
+
+(defun rfcview:read--hide-translation (key)
+  "Delete the overlay registered under KEY; the cache entry is untouched."
+  (let ((ov (gethash key rfcview:read-translation-overlays)))
+    (when (overlayp ov) (delete-overlay ov))
+    (puthash key nil rfcview:read-translation-overlays)))
+
+(defun rfcview:read--any-overlay-shown-p ()
+  "Return non-nil if at least one translation overlay is currently shown."
+  (let (found)
+    (when (hash-table-p rfcview:read-translation-overlays)
+      (maphash (lambda (_k v)
+                 (when (overlayp v) (setq found t)))
+               rfcview:read-translation-overlays))
+    found))
+
+(defun rfcview:read--hide-all-translations ()
+  "Hide every visible translation overlay (cache preserved)."
+  (when (hash-table-p rfcview:read-translation-overlays)
+    (let (keys)
+      (maphash (lambda (k v) (when (overlayp v) (push k keys)))
+               rfcview:read-translation-overlays)
+      (dolist (k keys) (rfcview:read--hide-translation k)))))
+
+(defun rfcview:read--any-region-overlay-p ()
+  "Return non-nil if at least one region-translation overlay is showing."
+  (let (found)
+    (when (hash-table-p rfcview:read--region-overlays)
+      (maphash (lambda (_k v) (when (overlayp v) (setq found t)))
+               rfcview:read--region-overlays))
+    found))
+
+(defun rfcview:read--hide-all-region-overlays ()
+  "Delete every region-translation overlay (cache preserved)."
+  (when (hash-table-p rfcview:read--region-overlays)
+    (let (keys)
+      (maphash (lambda (k v) (when (overlayp v) (push k keys)))
+               rfcview:read--region-overlays)
+      (dolist (k keys)
+        (let ((ov (gethash k rfcview:read--region-overlays)))
+          (when (overlayp ov) (delete-overlay ov))
+          (puthash k nil rfcview:read--region-overlays))))))
+
+(defun rfcview:read--show-region-overlay (beg end translation)
+  "Create the overlay that visually replaces BEG..END with TRANSLATION.
+Independent of the SINGLE/ALL paragraph overlay table — tracked in
+`rfcview:read--region-overlays' so it can be hidden as a set."
+  (let* ((key (cons beg end))
+         (existing (gethash key rfcview:read--region-overlays)))
+    (when (overlayp existing) (delete-overlay existing))
+    (let* ((display-text (rfcview:read--wrap-translation beg end translation))
+           (faced (propertize display-text 'face 'rfcview:read-translation-face))
+           (ov (make-overlay beg end)))
+      (overlay-put ov 'display faced)
+      (overlay-put ov 'evaporate t)
+      (overlay-put ov 'rfcview:translation 'region)
+      (puthash key ov rfcview:read--region-overlays)
+      ov)))
+
+(defun rfcview:read--paragraph-chunks-in-range (beg end)
+  "Return list of (CBEG . CEND) for each non-blank-line run in BEG..END.
+A blank line within the region terminates one chunk and starts the next.
+Used to break a multi-paragraph region into per-paragraph translation
+units so the original's shape is preserved instead of collapsing into a
+single block."
+  (save-excursion
+    (let (chunks)
+      (goto-char beg)
+      (while (< (point) end)
+        ;; Skip any blank lines at the start of the remaining range
+        (while (and (< (point) end)
+                    (looking-at-p "^[ \t]*$"))
+          (forward-line 1))
+        (when (< (point) end)
+          (let ((cbeg (point)))
+            (while (and (< (point) end)
+                        (not (looking-at-p "^[ \t]*$")))
+              (forward-line 1))
+            (let ((cend (min (point) end)))
+              (when (> cend cbeg)
+                (push (cons cbeg cend) chunks))))))
+      (nreverse chunks))))
+
+(defun rfcview:read--translate-and-show-region (beg end)
+  "Translate BEG..END as one or more per-paragraph region overlays.
+The range is split at blank-line boundaries (`--paragraph-chunks-in-range')
+so a region spanning multiple paragraphs becomes multiple independent
+overlays — each translated and laid out individually, preserving the
+original document's per-paragraph shape.  Reuses the shared translation
+cache, keyed by each chunk's bounds.  Does not modify any SINGLE/ALL state."
+  (let ((chunks (rfcview:read--paragraph-chunks-in-range beg end)))
+    (cond
+     ((null chunks)
+      (message "Region is empty"))
+     (t
+      (let ((failures 0))
+        (dolist (chunk chunks)
+          (let* ((cbeg (car chunk))
+                 (cend (cdr chunk))
+                 (key (cons cbeg cend))
+                 (cached (gethash key rfcview:read-translation-cache)))
+            (cond
+             (cached
+              (rfcview:read--show-region-overlay cbeg cend cached))
+             (t
+              (let* ((raw (buffer-substring-no-properties cbeg cend))
+                     (text (rfcview:read--collapse-text raw))
+                     (translated (rfcview:translate-fetch text)))
+                (cond
+                 ((stringp translated)
+                  (puthash key translated rfcview:read-translation-cache)
+                  (rfcview:read--show-region-overlay cbeg cend translated))
+                 (t
+                  (setq failures (1+ failures)))))))))
+        (cond
+         ((zerop failures)
+          (message (if (> (length chunks) 1)
+                       "Region translated (%d chunks)"
+                     "Region translated")
+                   (length chunks)))
+         ((= failures (length chunks))
+          (message "Translation failed"))
+         (t
+          (message "%d of %d chunks failed to translate"
+                   failures (length chunks)))))))))
+
+(defun rfcview:read-set-translation-language ()
+  "Prompt for a target translation language and persist the choice.
+Existing cached translations are discarded (they belong to the previous
+language); any currently-displayed translation overlays are hidden."
+  (interactive)
+  (let* ((choices (rfcview:translate--language-choices))
+         (default-name (rfcview:translate--default-language-name))
+         (current-name
+          (or (car (rassoc rfcview:translate-target-language choices))
+              default-name))
+         (prompt (if current-name
+                     (format "Translate to (current %s): " current-name)
+                   "Translate to: "))
+         (pick (completing-read prompt
+                                (mapcar #'car choices)
+                                nil t nil nil current-name))
+         (code (cdr (assoc pick choices))))
+    (unless code
+      (user-error "No ISO-639 code available for %s" pick))
+    (customize-save-variable 'rfcview:translate-target-language code)
+    (when (hash-table-p rfcview:read-translation-overlays)
+      (rfcview:read--hide-all-translations))
+    (when (hash-table-p rfcview:read--region-overlays)
+      (rfcview:read--hide-all-region-overlays))
+    (when (hash-table-p rfcview:read-translation-cache)
+      (clrhash rfcview:read-translation-cache))
+    (setq rfcview:read--translation-mode nil
+          rfcview:read--translation-single-key nil)
+    (message "rfcview: target language set to %s (%s); cache cleared" pick code)
+    code))
+
+(defun rfcview:read--translate-and-show-single (bounds)
+  "Translate the paragraph or region BOUNDS, show it, set mode=`single'.
+Reuses the cache when present; otherwise fetches synchronously.
+Returns non-nil on success, nil on translation failure."
+  (let* ((beg (car bounds))
+         (end (cdr bounds))
+         (key bounds)
+         (cached (gethash key rfcview:read-translation-cache)))
+    (cond
+     (cached
+      (rfcview:read--show-translation beg end cached)
+      (setq rfcview:read--translation-mode 'single
+            rfcview:read--translation-single-key key)
+      (message "Translation restored from cache")
+      t)
+     (t
+      (message "Translating…")
+      (let* ((raw (buffer-substring-no-properties beg end))
+             (text (rfcview:read--collapse-text raw))
+             (translated (rfcview:translate-fetch text)))
+        (cond
+         ((stringp translated)
+          (puthash key translated rfcview:read-translation-cache)
+          (rfcview:read--show-translation beg end translated)
+          (setq rfcview:read--translation-mode 'single
+                rfcview:read--translation-single-key key)
+          (message "Translated")
+          t)
+         (t
+          (message "Translation failed")
+          nil)))))))
+
+(defun rfcview:read-translate-at-point ()
+  "Toggle translation of paragraph at point, region, or the region overlay.
+
+Dispatch order:
+  1. Any region-translation overlay visible → hide them all.  Pressing
+     `t' anywhere clears the additive region overlays without disturbing
+     the SINGLE/ALL paragraph state.
+  2. Active region (mark) → translate that range as an independent
+     region overlay; SINGLE/ALL paragraph state is left alone.
+  3. Blank line, no region overlays → if SINGLE is on, hide it.
+  4. Otherwise → run the paragraph state machine.
+
+When a new overlay (single or region) is shown, point is moved to the
+end of the unit and `window-start' is preserved so the buffer doesn't
+scroll under the user."
+  (interactive)
+  (rfcview:translate--ensure-target-language)
+  (cond
+   ;; Rule 1: priority — hide region overlays
+   ((rfcview:read--any-region-overlay-p)
+    (rfcview:read--hide-all-region-overlays)
+    (message "Region translation hidden"))
+   ;; Rule 2: active region — additive translate (split across paragraphs)
+   ((use-region-p)
+    (let* ((beg (region-beginning))
+           (end (region-end))
+           (win (get-buffer-window (current-buffer)))
+           (ws (and win (window-start win))))
+      (deactivate-mark)
+      (rfcview:read--translate-and-show-region beg end)
+      (when (rfcview:read--any-region-overlay-p)
+        (goto-char end)
+        (when (and win (window-live-p win))
+          (set-window-start win ws t)))))
+   (t
+    ;; Rules 3+4: paragraph dispatch
+    (let ((bounds (rfcview:read--paragraph-bounds-at (point))))
+      (cond
+       ((null bounds)
+        (if (eq (rfcview:read--translation-state) 'single)
+            (let ((current rfcview:read--translation-single-key))
+              (rfcview:read--hide-translation current)
+              (setq rfcview:read--translation-mode nil
+                    rfcview:read--translation-single-key nil)
+              (message "Translation hidden"))
+          (message "Not inside a paragraph")))
+       (t
+        (let* ((win (get-buffer-window (current-buffer)))
+               (ws (and win (window-start win)))
+               (state (rfcview:read--translation-state))
+               (key bounds))
+          (cl-case state
+            (idle
+             (rfcview:read--translate-and-show-single bounds))
+            (single
+             (let ((current rfcview:read--translation-single-key))
+               (cond
+                ((equal current key)
+                 (rfcview:read--hide-translation key)
+                 (setq rfcview:read--translation-mode nil
+                       rfcview:read--translation-single-key nil)
+                 (message "Translation hidden"))
+                (t
+                 (when current
+                   (rfcview:read--hide-translation current))
+                 (rfcview:read--translate-and-show-single bounds)))))
+            (running
+             (rfcview:read--cancel-job)
+             (rfcview:read--translate-and-show-single bounds))
+            ((all-shown all-hidden)
+             (rfcview:read--hide-all-translations)
+             (setq rfcview:read--translation-mode nil
+                   rfcview:read--translation-single-key nil)
+             (rfcview:read--translate-and-show-single bounds)))
+          (when (and (hash-table-p rfcview:read-translation-overlays)
+                     (overlayp
+                      (gethash bounds rfcview:read-translation-overlays)))
+            (goto-char (cdr bounds))
+            (when (and win (window-live-p win))
+              (set-window-start win ws t))))))))))
+
+(defun rfcview:read--process-next-paragraph (buffer)
+  "Pop one paragraph off BUFFER's job queue and start its async fetch.
+Called recursively from each fetch callback."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (let ((job rfcview:read-translation-job))
+        (cond
+         ((or (null job) (plist-get job :cancelled)) nil)
+         ((null (plist-get job :remaining))
+          (let ((total (plist-get job :total)))
+            (setq rfcview:read-translation-job nil)
+            (message "Translation complete (%d paragraph(s))" total)))
+         (t
+          (let* ((remaining (plist-get job :remaining))
+                 (next (car remaining))
+                 (beg (car next))
+                 (end (cdr next))
+                 (raw (buffer-substring-no-properties beg end))
+                 (text (rfcview:read--collapse-text raw))
+                 (tgt (rfcview:translate--ensure-target-language))
+                 (src rfcview:translate-source-language))
+            (plist-put job :remaining (cdr remaining))
+            (let ((url-buf
+                   (rfcview:translate-fetch-async
+                    text src tgt
+                    (lambda (translated)
+                      (when (buffer-live-p buffer)
+                        (with-current-buffer buffer
+                          (let ((curjob rfcview:read-translation-job))
+                            (when (and curjob
+                                       (not (plist-get curjob :cancelled)))
+                              (when (stringp translated)
+                                (puthash (cons beg end) translated
+                                         rfcview:read-translation-cache)
+                                (rfcview:read--show-translation
+                                 beg end translated))
+                              (plist-put curjob :done
+                                         (1+ (plist-get curjob :done)))
+                              (plist-put curjob :url-buffer nil)
+                              (let ((done (plist-get curjob :done))
+                                    (total (plist-get curjob :total)))
+                                (when (or (= done total)
+                                          (zerop (mod done 5)))
+                                  (message "Translating %d/%d…" done total)))
+                              (rfcview:read--process-next-paragraph
+                               buffer)))))))))
+              (plist-put job :url-buffer url-buf)))))))))
+
+(defun rfcview:read--cancel-job ()
+  "Abort the currently running document-translation job.
+Resets mode to idle, hides every visible overlay, and clears single-key."
+  (let ((job rfcview:read-translation-job))
+    (when job
+      (plist-put job :cancelled t)
+      (let ((url-buf (plist-get job :url-buffer)))
+        (when (buffer-live-p url-buf)
+          (let ((proc (get-buffer-process url-buf)))
+            (when (processp proc)
+              (set-process-query-on-exit-flag proc nil)
+              (delete-process proc)))
+          (kill-buffer url-buf)))
+      (let ((done (plist-get job :done))
+            (total (plist-get job :total)))
+        (rfcview:read--hide-all-translations)
+        (rfcview:read--hide-all-region-overlays)
+        (setq rfcview:read-translation-job nil
+              rfcview:read--translation-mode nil
+              rfcview:read--translation-single-key nil)
+        (message "Translation cancelled (%d of %d done; original restored)"
+                 done total)))))
+
+(defun rfcview:read--start-or-restore-document ()
+  "Show cached paragraph translations and queue uncached ones for fetch.
+Sets `rfcview:read--translation-mode' to `all'.  Used by every T
+transition that ends in an `all-shown' state."
+  (rfcview:translate--ensure-target-language)
+  (let* ((paragraphs (rfcview:read--paragraphs-visible-first
+                      (rfcview:read--all-paragraphs)))
+         cached to-fetch)
+    (dolist (p paragraphs)
+      (if (gethash p rfcview:read-translation-cache)
+          (push p cached)
+        (push p to-fetch)))
+    (setq cached (nreverse cached)
+          to-fetch (nreverse to-fetch))
+    (dolist (p cached)
+      (rfcview:read--show-translation
+       (car p) (cdr p)
+       (gethash p rfcview:read-translation-cache)))
+    (setq rfcview:read--translation-mode 'all
+          rfcview:read--translation-single-key nil)
+    (cond
+     ((and (null to-fetch) cached)
+      (message "Translations restored from cache"))
+     ((null to-fetch)
+      (message "Nothing to translate"))
+     (t
+      (setq rfcview:read-translation-job
+            (list :url-buffer nil
+                  :remaining to-fetch
+                  :total (length to-fetch)
+                  :done 0
+                  :cancelled nil))
+      (message "Translating %d paragraph(s) (visible area first)…"
+               (length to-fetch))
+      (rfcview:read--process-next-paragraph (current-buffer))))))
+
+(defun rfcview:read-translate-document ()
+  "Translate every paragraph in the document, visible area first.
+
+State machine:
+- IDLE        → start a fresh job; visible-area paragraphs first.
+- SINGLE      → absorb the single-`t' overlay into the document set
+                and translate the rest; the existing overlay stays visible.
+- RUNNING     → cancel the in-flight job, hide all overlays.
+- ALL_SHOWN   → hide all overlays (cache preserved).
+- ALL_HIDDEN  → re-show every cached translation."
+  (interactive)
+  (let ((state (rfcview:read--translation-state)))
+    (cl-case state
+      (running
+       (rfcview:read--cancel-job))
+      (all-shown
+       (rfcview:read--hide-all-translations)
+       (message "Translations hidden; original document restored"))
+      (all-hidden
+       (rfcview:read--start-or-restore-document))
+      ;; idle or single — start fresh (single → absorbed into all)
+      ((idle single)
+       (rfcview:read--start-or-restore-document)))))
+
 (defun rfcview:read-quit ()
   "Bury the RFC reader buffer and return to the RFC index.
 If the `*RFC INDEX*' window is visible, select it.  Otherwise, if
@@ -899,7 +1528,24 @@ the index buffer has been killed, just bury the reader."
       (insert "    + / 0 / -   increase / reset / decrease text scale\n")
       (insert "    o           view original file\n")
       (insert "    q           quit\n")
-      (insert "    ?           this help\n"))
+      (insert "    ?           this help\n\n")
+      (insert "  Translate\n")
+      (insert "    t           dispatch:\n")
+      (insert "                  - any region-translation overlay shown:\n")
+      (insert "                    hide them all (at any point position);\n")
+      (insert "                  - active region: translate the marked range\n")
+      (insert "                    as an additive overlay (does not disturb\n")
+      (insert "                    the paragraph state machine);\n")
+      (insert "                  - blank line + SINGLE: hide the SINGLE;\n")
+      (insert "                  - in a paragraph: SINGLE state machine\n")
+      (insert "                    (different paragraph restores previous,\n")
+      (insert "                    same paragraph toggles off)\n")
+      (insert "    T           whole-document translate, visible area first,\n")
+      (insert "                async serial; press again while running to\n")
+      (insert "                cancel, or after completion to hide / re-show\n")
+      (insert "                all overlays from cache\n")
+      (insert "    l           choose target translation language\n")
+      (insert "                (persisted via Customize; clears the cache)\n"))
     (view-mode 1)
     (goto-char (point-min)))
   (display-buffer "*RFC Help*"))
@@ -945,6 +1591,7 @@ run on regions with no overlays yet and be a silent no-op."
   (rfcview:read-buttonize-toc)
   (rfcview:read-buttonize-refs)
   (rfcview:read--init-goto-address)
+  (rfcview:read--init-translation-state)
   (run-hooks 'rfcview-read-mode-hook))
 
 (defun rfcview:read-view-original ()

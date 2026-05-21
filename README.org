@@ -23,6 +23,7 @@
   - Clickable TOC entries, RFC cross-references, and URLs
   - History back / forward across followed links
   - Seamless page breaks; looks like one continuous page
+  - Inline Google Translate overlays — per-paragraph or whole-document, asynchronous, cache-aware
 
 
 * Installation
@@ -88,6 +89,9 @@ In an RFC read buffer:
 | =b= / =f=             | Backward / forward char                                         |
 | =+= / =-= / =0=       | Increase / decrease / reset font size                           |
 | =o=                   | View raw cached file                                            |
+| =t=                   | Translate paragraph at point or region (see /Translation/)      |
+| =T=                   | Whole-document translate / cancel / hide / restore              |
+| =l=                   | Change target translation language                              |
 | =?=                   | Help                                                            |
 | =q=                   | Quit (refocus index if visible)                                 |
 
@@ -128,6 +132,43 @@ Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]]. rfcvie
     :commands rfcview
     :custom (rfcview:preferred-format 'pdf))   ; or 'txt, 'html, 'xml
 #+END_SRC
+
+* Translation
+
+rfcview can translate RFC paragraphs in place via the unofficial Google Translate gtx endpoint — no API key required. The original buffer text is never modified; translations appear as overlays whose =display= property visually replaces the original. =buffer-substring= still returns the English, and =copy/paste= yields English.
+
+** Keys
+
+| Key | Action                                                                                                                                                                                                                                                                |
+|-----+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| =t= | Four-way dispatch (see below)                                                                                                                                                                                                                                         |
+| =T= | Translate every paragraph in the document, async-serial, visible area first. Pressing =T= while a job is running cancels it and restores the original text. After completion, =T= toggles all overlays on / off; cached paragraphs reappear instantly without network. |
+| =l= | Prompt for a different target language. The choice is persisted via Customize and clears any cached translations (they belonged to the previous language).                                                                                                            |
+
+The =t= key dispatches in this order:
+
+1. *Any region-translation overlay is visible* → hide them all (point position irrelevant). Pressing =t= anywhere is the cleanup gesture for the additive region overlays.
+2. *Active region (mark)* → translate the marked range as an additive overlay. If the region spans multiple paragraphs, it is split at blank-line boundaries and each paragraph chunk gets its own overlay so the original's per-paragraph shape is preserved. Does **not** disturb the paragraph SINGLE/ALL state — region and paragraph overlays coexist.
+3. *Point on a blank line, no region overlays* → if a SINGLE paragraph overlay is on, hide it.
+4. *Inside a paragraph* → the paragraph state machine: pressing =t= in a different paragraph restores the previous one and translates the new one; in the same paragraph, toggles off.
+
+=t= (paragraph mode) and =T= (document mode) are mutually exclusive: at most one paragraph-=t= overlay is visible at a time, and =T= absorbs any pre-existing =t= overlay into the document set. Region overlays are independent of both — they're an additive layer that =t= cleans up before doing anything else.
+
+** Language selection
+
+On the first translation in a session, rfcview prompts for the target language using Google Translate's live supported-languages API (no hand-coded list). The completion default is derived from =current-language-environment= (e.g. =Korean= → =ko=). The selected ISO 639 code is saved to the =rfcview:translate-target-language= defcustom; subsequent sessions skip the prompt. Press =l= at any time to switch.
+
+** Layout and behavior
+
+- The translated overlay's wrap width matches the original paragraph's widest line, with the document-wide widest line as a floor so short paragraphs don't render narrower than the surrounding text. A small slack accounts for word-boundary wrapping leaving CJK lines short of the right margin.
+- Internal whitespace runs (including hard-wrap newlines and per-line indentation) are flattened to single spaces before being sent to the translator — otherwise Google's segmentation gets confused by RFC-style hard wraps.
+- After a single-paragraph translation, point is moved to the end of the paragraph and =window-start= is preserved, so the buffer does not scroll.
+- All translations are cached per-buffer for the session, so re-toggling never re-hits the network.
+
+** Caveats
+
+- The gtx endpoint is unofficial; Google can change it at any time. If translations stop working, check =rfcview:translate-endpoint= and =rfcview:translate-languages-endpoint=.
+- Long ASCII art, code listings, or pre-formatted tables won't translate sensibly — use the region form (=t= with a marked range) to keep them out of the input.
 
 * License
 

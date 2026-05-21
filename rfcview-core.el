@@ -93,6 +93,41 @@ chronological order; Keywords preserves relevance-score order."
   :type 'integer
   :group 'rfcview)
 
+(defcustom rfcview:translate-target-language nil
+  "Target ISO-639 language code for paragraph translation.
+nil means \"ask on first use and persist via Customize\".
+Codes are taken from the `iso639-language' property of entries in
+`language-info-alist'."
+  :type '(choice (const :tag "Ask on first use" nil)
+                 (string :tag "ISO 639 code (e.g., ko)"))
+  :group 'rfcview)
+
+(defcustom rfcview:translate-source-language "auto"
+  "Source language code; \"auto\" lets Google detect it."
+  :type 'string
+  :group 'rfcview)
+
+(defcustom rfcview:translate-endpoint
+  "https://translate.googleapis.com/translate_a/single"
+  "Base URL of the Google Translate public endpoint.
+The default uses the unofficial gtx client which requires no API
+key.  Override only if you need to proxy or self-host."
+  :type 'string
+  :group 'rfcview)
+
+(defcustom rfcview:translate-languages-endpoint
+  "https://translate.googleapis.com/translate_a/l"
+  "URL of the Google Translate supported-languages endpoint.
+Used by `rfcview:translate-fetch-languages' to populate the
+language-pick prompt.  Returns a JSON object whose `tl' key maps
+ISO 639 codes to display names."
+  :type 'string
+  :group 'rfcview)
+
+(defvar rfcview:translate--languages-cache nil
+  "Session-cached alist (NAME . CODE) of Google Translate target languages.
+Populated lazily on the first call to `rfcview:translate--language-choices'.")
+
 (defvar rfcview:nav-history (cons nil nil)
   "Reader navigation history as a cons cell (BACK . FORWARD).
 BACK is a stack of past (RFC-NUMBER . POSITION) records (newest first);
@@ -368,6 +403,168 @@ everything else is rebuilt by the next index refresh."
                               " "))
                  (reverse phrase)
                  (concat "\n" (make-string margin-width ?\s))))))
+
+;; ─── Translation helpers ────────────────────────────────────────────────────
+
+(defun rfcview:translate-fetch-languages ()
+  "Fetch supported target languages from Google Translate.
+Returns an alist of (NAME . CODE) sorted by NAME, or nil on failure.
+Hits `rfcview:translate-languages-endpoint' synchronously via
+`rfcview:retrieve'.  The `auto' pseudo-language and any entries with
+non-string display names are filtered out."
+  (let* ((url (concat rfcview:translate-languages-endpoint
+                      "?client=gtx&hl=en"))
+         (buf (rfcview:retrieve url)))
+    (unwind-protect
+        (let ((status (rfcview:http-response-status buf)))
+          (when (and status (= status 200))
+            (let* ((body (rfcview:translate--read-body buf))
+                   (parsed (and body
+                                (condition-case _err
+                                    (json-parse-string body
+                                                       :object-type 'alist
+                                                       :array-type 'array
+                                                       :null-object nil)
+                                  (error nil))))
+                   (tl (and parsed (alist-get 'tl parsed))))
+              (when (consp tl)
+                (sort
+                 (delq nil
+                       (mapcar (lambda (pair)
+                                 (let ((code (symbol-name (car pair)))
+                                       (name (cdr pair)))
+                                   (when (and (stringp name)
+                                              (not (string= code "auto")))
+                                     (cons name code))))
+                               tl))
+                 (lambda (a b) (string< (car a) (car b))))))))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(defun rfcview:translate--language-choices ()
+  "Return the supported target-language alist (NAME . CODE).
+Fetched from Google Translate's languages API on first call and cached
+in `rfcview:translate--languages-cache' for the rest of the session.
+Signals an error if the fetch fails — the language picker has no value
+without a live list, and the user should be told rather than silently
+falling back to a stale baked-in list."
+  (or rfcview:translate--languages-cache
+      (let ((langs (rfcview:translate-fetch-languages)))
+        (unless langs
+          (user-error "Could not fetch supported languages from Google Translate"))
+        (setq rfcview:translate--languages-cache langs))))
+
+(defun rfcview:translate--default-language-name ()
+  "Return the Google-Translate display name matching `current-language-environment'.
+Maps the environment to an ISO 639 code via `language-info-alist''s
+`iso639-language' property, then looks that code up in the
+`rfcview:translate--language-choices' list (Google's names).
+Returns nil when there is no match (e.g., env has no iso639 code, or
+Google does not list it as a target language)."
+  (let* ((env current-language-environment)
+         (raw (get-language-info env 'iso639-language))
+         (code (cond ((and raw (symbolp raw)) (symbol-name raw))
+                     ((and raw (listp raw) (car raw))
+                      (symbol-name (car raw)))
+                     (t nil))))
+    (when code
+      (car (rassoc code (rfcview:translate--language-choices))))))
+
+(defun rfcview:translate--ensure-target-language ()
+  "Return the target-language code, prompting and persisting if unset."
+  (or rfcview:translate-target-language
+      (let* ((choices (rfcview:translate--language-choices))
+             (default-name (rfcview:translate--default-language-name))
+             (prompt (if default-name
+                         (format "Translate to (default %s): " default-name)
+                       "Translate to: "))
+             (pick (completing-read prompt
+                                    (mapcar #'car choices)
+                                    nil t nil nil default-name))
+             (code (cdr (assoc pick choices))))
+        (unless code
+          (user-error "No ISO-639 code available for %s" pick))
+        (customize-save-variable 'rfcview:translate-target-language code)
+        (message "rfcview: target language set to %s (%s)" pick code)
+        code)))
+
+(defun rfcview:translate--build-url (text source target)
+  "Build the Google Translate request URL for TEXT, SOURCE→TARGET."
+  (concat rfcview:translate-endpoint
+          "?client=gtx"
+          "&sl=" (url-hexify-string source)
+          "&tl=" (url-hexify-string target)
+          "&dt=t"
+          "&q=" (url-hexify-string text)))
+
+(defun rfcview:translate--parse-response (body)
+  "Parse Google Translate JSON BODY; return the joined translation string.
+Google's response is `[ [ [trans, src, …], … ], … ]'.  Concatenate every
+chunk's translation cell from `outer[0]'.  Returns nil on parse failure."
+  (condition-case _err
+      (let* ((json (json-parse-string body
+                                      :array-type 'array
+                                      :null-object nil))
+             (chunks (and (arrayp json) (> (length json) 0) (aref json 0)))
+             (parts (when (arrayp chunks)
+                      (let (acc)
+                        (dotimes (i (length chunks))
+                          (let ((chunk (aref chunks i)))
+                            (when (and (arrayp chunk) (> (length chunk) 0))
+                              (let ((s (aref chunk 0)))
+                                (when (stringp s) (push s acc))))))
+                        (nreverse acc)))))
+        (when parts (apply #'concat parts)))
+    (error nil)))
+
+(defun rfcview:translate--read-body (buffer)
+  "Return the response body string from `url-retrieve' BUFFER, or nil.
+Decodes UTF-8 when BUFFER is unibyte (raw bytes from url.el); otherwise
+returns the body as-is."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (goto-char (point-min))
+      (when (re-search-forward "\r?\n\r?\n" nil t)
+        (let ((body (buffer-substring-no-properties (point) (point-max))))
+          (if (multibyte-string-p body)
+              body
+            (decode-coding-string body 'utf-8)))))))
+
+(defun rfcview:translate-fetch (text &optional source target)
+  "Synchronously translate TEXT from SOURCE to TARGET via Google Translate.
+SOURCE defaults to `rfcview:translate-source-language', TARGET to the
+result of `rfcview:translate--ensure-target-language'.  Returns the
+translated string or nil on HTTP/parse failure."
+  (let* ((src (or source rfcview:translate-source-language))
+         (tgt (or target (rfcview:translate--ensure-target-language)))
+         (url (rfcview:translate--build-url text src tgt))
+         (buf (rfcview:retrieve url)))
+    (unwind-protect
+        (let ((status (rfcview:http-response-status buf)))
+          (when (and status (= status 200))
+            (rfcview:translate--parse-response
+             (rfcview:translate--read-body buf))))
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
+(defun rfcview:translate-fetch-async (text source target callback)
+  "Asynchronously translate TEXT from SOURCE to TARGET.
+Calls CALLBACK with the translated string (or nil on error).  Returns
+the `url-retrieve' buffer so the caller can abort via
+\(delete-process (get-buffer-process BUF)\)."
+  (let* ((url (rfcview:translate--build-url text source target))
+         (url-request-method "GET"))
+    (url-retrieve
+     (url-encode-url url)
+     (lambda (status)
+       (let ((buf (current-buffer))
+             translated)
+         (unwind-protect
+             (unless (plist-get status :error)
+               (setq translated
+                     (rfcview:translate--parse-response
+                      (rfcview:translate--read-body buf))))
+           (when (buffer-live-p buf) (kill-buffer buf)))
+         (funcall callback translated)))
+     nil t t)))
 
 (provide 'rfcview-core)
 ;;; rfcview-core.el ends here
