@@ -572,7 +572,7 @@ has already wrapped in a `rfcview:section-link-button'."
                    ;; Sections AA and BB and CC of RFC 1234
                    (concat "\\(section[s]?[ \n]+\\)\\([0-9A-Z.]+\\)"
                            "\\(\\(?:[ \n]+\\(?:and\\|or\\)[ \n]+[0-9A-Z.]+\\)+\\)?"
-                           "[ \n]+of[ \n]+\\[?RFC ?[0-9]+\\]?")
+                           "[ \n]+of[ \n]+\\[?RFC[ \n]*[0-9]+\\]?")
                    nil)
               (let* ((section (match-string 2))
                      (more-begin (match-beginning 3))
