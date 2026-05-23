@@ -22,7 +22,8 @@
   :type 'string
   :group 'rfcview)
 
-(defcustom rfcview:parsed-index-cache-file (concat rfcview:local-directory ".cache")
+(defcustom rfcview:parsed-index-cache-file
+  (concat rfcview:local-directory ".cache")
   "The location where the parsed rfc index is being stored."
   :type 'string
   :group 'rfcview)
@@ -354,7 +355,8 @@ version is migrated identically."
   (ignore old-version)
   (setq rfcview:rfc-cache
         (list :version       rfcview:rfc-cache-version
-              :last-modified (plist-get rfcview:rfc-cache-default :last-modified)
+              :last-modified (plist-get rfcview:rfc-cache-default
+                                        :last-modified)
               :favorite      (plist-get rfcview:rfc-cache :favorite)
               :recent        (plist-get rfcview:rfc-cache :recent))))
 
@@ -380,7 +382,8 @@ everything else is rebuilt by the next index refresh."
     (insert (prin1-to-string rfcview:rfc-cache))
     (write-file rfcview:parsed-index-cache-file)))
 
-(defun rfcview:wrap-text-at-word-boundary (text margin-width max-width &optional delimiters)
+(defun rfcview:wrap-text-at-word-boundary (text margin-width max-width
+                                                &optional delimiters)
   "Wrap text at word boundary to fit in given width."
   (setq delimiters (or delimiters " "))
   (let (phrase line offset word-len)
@@ -450,11 +453,12 @@ falling back to a stale baked-in list."
   (or rfcview:translate--languages-cache
       (let ((langs (rfcview:translate-fetch-languages)))
         (unless langs
-          (user-error "Could not fetch supported languages from Google Translate"))
+          (user-error
+           "Could not fetch supported languages from Google Translate"))
         (setq rfcview:translate--languages-cache langs))))
 
 (defun rfcview:translate--default-language-name ()
-  "Return the Google-Translate display name matching `current-language-environment'.
+  "Return the Google-Translate name matching `current-language-environment'.
 Maps the environment to an ISO 639 code via `language-info-alist''s
 `iso639-language' property, then looks that code up in the
 `rfcview:translate--language-choices' list (Google's names).

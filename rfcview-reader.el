@@ -24,6 +24,8 @@ and consumed by `rfcview:read-buttonize-toc'.")
   "Hash mapping normalized heading-title strings to heading position markers.
 Fallback lookup for TOC entries without a section number.")
 
+;; ─── Translation state ───
+
 (defvar-local rfcview:read-translation-cache nil
   "Hash table mapping `(BEG . END)' cons keys to translated strings.
 Populated by `rfcview:read-translate-at-point' and
@@ -89,7 +91,7 @@ do not get rendered narrower than the rest of the document.")
 
 (defface rfcview:read-translation-face
   '((((class color) (min-colors 88) (background dark))
-     (:foreground "light blue"))
+     (:foreground "gold"))
     (((class color) (min-colors 88) (background light))
      (:foreground "royal blue"))
     (((class color) (background dark))
@@ -133,21 +135,25 @@ do not get rendered narrower than the rest of the document.")
    "\\|^\n[0-9]+\\(?:\\.[0-9]+\\)+\\.?[ \t]+[A-Z(\"][^\n]*[^.\n]\n\n"
    ;; Wrapped subsection title (X.Y form only, e.g. RFC 8968 §2.6):
    ;; "2.6.  Long title that overflows\n      onto a second line\n\n"
+   ;; (Regex literal exceeds 80 cols — kept on one line.)
    "\\|^\n[0-9]+\\(?:\\.[0-9]+\\)+\\.?[ \t]+[A-Z(\"][^\n]*\n[ \t]\\{5,\\}[a-zA-Z\"][^\n]*\n\n"
-   ;; Appendix headings are unambiguous so both single-line and one-continuation-
-   ;; line titles are matched.
-   ;; Appendix (modern): "Appendix A.  Title" or wrapped onto a second indented line
+   ;; Appendix headings are unambiguous so both single-line and
+   ;; one-continuation-line titles are matched.
+   ;; Appendix (modern): "Appendix A.  Title" or wrapped onto a second
+   ;; indented line.
    "\\|^\nAppendix [A-Z]\\.[ \t]+[A-Z][^\n]*\\(?:\n[ \t]\\{5,\\}[^\n]+\\)?\n\n"
    ;; Appendix (RFC 791 era, all-caps colon): "APPENDIX A:  Title"
    "\\|^\nAPPENDIX [A-Z]:[ \t]+[A-Z][^\n]*\n\n"
    "\\|^\nAPPENDIX [IVX]+[ \t]+-[ \t]+[A-Z][^\n]*\n\n"
-   ;; Appendix subsection: "A.1.  Title" / "B.10 Title" / "A.4.1. Title" (1-2 digit
-   ;; per segment to avoid X.509-style false hits; one or more segments to support
-   ;; arbitrary nesting depth), also handles a title that wraps onto one indented
-   ;; continuation line.
+   ;; Appendix subsection: "A.1.  Title" / "B.10 Title" /
+   ;; "A.4.1. Title" (1-2 digits per segment to avoid X.509-style
+   ;; false hits; one or more segments to support arbitrary nesting
+   ;; depth), also handles a title that wraps onto one indented
+   ;; continuation line.  Regex literal exceeds 80 cols — kept whole.
    "\\|^\n[A-Z]\\(?:\\.[0-9]\\{1,2\\}\\)+\\.?[ \t]+[A-Z][^\n]*\\(?:\n[ \t]\\{5,\\}[^\n]+\\)?\n\n"
-   ;; Dash-form appendix subsection (RFC 1001 style): "A-1.  Title" / "B-1.1  Title"
-   ;; / "B-6.1  Title".  1-2 digits per segment for symmetry with the dot form.
+   ;; Dash-form appendix subsection (RFC 1001 style): "A-1.  Title" /
+   ;; "B-1.1  Title" / "B-6.1  Title".  1-2 digits per segment for
+   ;; symmetry with the dot form.
    "\\|^\n[A-Z]-[0-9]+\\(?:\\.[0-9]\\{1,2\\}\\)*\\.?[ \t]+[A-Z][^\n]*\n\n"
    ;; ALL-CAPS bare-word headings (RFC 854/959/1122 era):
    ;; "INTRODUCTION" / "GENERAL CONSIDERATIONS" / "LINK LAYER REFERENCES"
@@ -160,12 +166,14 @@ do not get rendered narrower than the rest of the document.")
    "\\|^\nAbstract[^\n]*\n\n"
    ;; Dash-underline style (RFC 768 era): "Introduction\n------------\n"
    "\\|^\n[ ]*[A-Z][a-zA-Z0-9. ]+\n[ ]*-\\{3,\\}\n\n")
-  "Regexp matching RFC section headings across all eras, preceded by a blank line.
-Subsection titles (`X.Y' form and deeper) may contain commas (RFC 8698 §6.2)
-and may wrap onto an indented continuation line (RFC 8968 §2.6).  Top-level
-numbered titles (`X.') may contain commas only when the title does not end
-with a period (RFC 9959 §2 \"Language, Notation, and Terms\"); sentence-shape
-list items like \"3.  Foo, bar.\" are still rejected.")
+  "Regexp matching RFC section headings across all eras.
+Each alternative requires a preceding blank line.  Subsection titles
+(`X.Y' form and deeper) may contain commas (RFC 8698 §6.2) and may
+wrap onto an indented continuation line (RFC 8968 §2.6).  Top-level
+numbered titles (`X.') may contain commas only when the title does
+not end with a period (RFC 9959 §2 \"Language, Notation, and
+Terms\"); sentence-shape list items like \"3.  Foo, bar.\" are still
+rejected.")
 
 (defconst rfcview:supported-formats '(txt pdf html xml)
   "All formats rfcview can route to a viewer.
@@ -361,32 +369,40 @@ ALL-CAPS, Abstract, etc.)."
         (when (> (length title) 0)
           (puthash (rfcview:read--normalize-title title)
                    marker rfcview:read-section-anchors-by-title))))
-     ((string-match "\\`Appendix \\([A-Z]\\)\\.?[ \t]+\\(.*\\)" heading-line)
+     ((string-match "\\`Appendix \\([A-Z]\\)\\.?[ \t]+\\(.*\\)"
+                    heading-line)
       (puthash (match-string 1 heading-line)
                marker rfcview:read-section-anchors-by-number)
-      (puthash (rfcview:read--normalize-title (match-string 2 heading-line))
+      (puthash (rfcview:read--normalize-title
+                (match-string 2 heading-line))
                marker rfcview:read-section-anchors-by-title))
-     ((string-match "\\`APPENDIX \\([A-Z]\\|[IVX]+\\)\\(?:[: \t-]+\\(.*\\)\\)?\\'"
-                    heading-line)
+     ((string-match
+       "\\`APPENDIX \\([A-Z]\\|[IVX]+\\)\\(?:[: \t-]+\\(.*\\)\\)?\\'"
+       heading-line)
       (puthash (match-string 1 heading-line)
                marker rfcview:read-section-anchors-by-number)
       (let ((title (match-string 2 heading-line)))
         (puthash (rfcview:read--normalize-title
                   (if (and title (> (length title) 0)) title heading-line))
                  marker rfcview:read-section-anchors-by-title)))
-     ;; Dash-form appendix subsection (RFC 1001): "A-1.  Title" / "B-1.1  Title".
+     ;; Dash-form appendix subsection (RFC 1001):
+     ;; "A-1.  Title" / "B-1.1  Title".
      ((string-match "\\`\\([A-Z]-[0-9]+\\(?:\\.[0-9]+\\)*\\)\\.?[ \t]+\\(.*\\)"
                     heading-line)
       (puthash (match-string 1 heading-line)
                marker rfcview:read-section-anchors-by-number)
-      (puthash (rfcview:read--normalize-title (match-string 2 heading-line))
+      (puthash (rfcview:read--normalize-title
+                (match-string 2 heading-line))
                marker rfcview:read-section-anchors-by-title))
      ;; Numeric heading matched outside group 1 (top-level X. with commas, or
      ;; wrapped/comma-bearing X.Y+ subsection — only line 1 is in heading-line).
-     ((string-match "\\`\\([0-9]+\\(?:\\.[0-9]+\\)*\\)\\.?[ \t]+\\(.*\\)" heading-line)
+     ((string-match
+       "\\`\\([0-9]+\\(?:\\.[0-9]+\\)*\\)\\.?[ \t]+\\(.*\\)"
+       heading-line)
       (puthash (match-string 1 heading-line)
                marker rfcview:read-section-anchors-by-number)
-      (puthash (rfcview:read--normalize-title (match-string 2 heading-line))
+      (puthash (rfcview:read--normalize-title
+                (match-string 2 heading-line))
                marker rfcview:read-section-anchors-by-title))
      ((string-match "\\`\\([A-Z]\\(?:\\.[0-9]+\\)+\\)\\.?[ \t]+\\(.*\\)"
                     heading-line)
@@ -466,8 +482,10 @@ markers pointing at each heading, used later by `rfcview:read-buttonize-toc'."
                                  (line-beginning-position)
                                  (line-end-position)))))))
           (forward-line 1))
-        (put-text-property header-start (point) 'face 'rfcview:read-rfc-header-face))
-      ;; Title: first block of indented (centered) non-blank lines after the header gap
+        (put-text-property header-start (point)
+                           'face 'rfcview:read-rfc-header-face))
+      ;; Title: first block of indented (centered) non-blank lines after
+      ;; the header gap.
       (forward-line 1)
       (while (and (not (eobp)) (looking-at "^[ \t]*$"))
         (forward-line 1))
@@ -478,19 +496,24 @@ markers pointing at each heading, used later by `rfcview:read-buttonize-toc'."
           (forward-line 1)
           (setq title-end (point)))
         (when (< title-start title-end)
-          (put-text-property title-start title-end 'face 'rfcview:read-rfc-title-face)))
-      ;; Section headings: apply face to the heading line only (not surrounding blanks)
+          (put-text-property title-start title-end
+                             'face 'rfcview:read-rfc-title-face)))
+      ;; Section headings: apply face to the heading line only (not
+      ;; surrounding blanks).
       (while (re-search-forward rfcview:section-heading-regexp nil t)
         (let* ((line-start (1+ (match-beginning 0)))
                (line-end (save-excursion
                            (goto-char line-start)
                            (line-end-position)))
-               (heading-line (buffer-substring-no-properties line-start line-end))
+               (heading-line (buffer-substring-no-properties
+                              line-start line-end))
                (num-prefix (and (match-beginning 1) (match-string 1))))
-          (put-text-property line-start line-end 'face 'rfcview:read-rfc-section-face)
+          (put-text-property line-start line-end
+                             'face 'rfcview:read-rfc-section-face)
           (rfcview:read--register-anchor line-start heading-line num-prefix)
-          ;; Back up one char when the match consumed a trailing blank line so
-          ;; it remains available as the leading blank for the next heading match.
+          ;; Back up one char when the match consumed a trailing blank
+          ;; line so it remains available as the leading blank for the
+          ;; next heading match.
           (when (and (>= (point) 2)
                      (eq (char-before (point)) ?\n)
                      (eq (char-before (1- (point))) ?\n))
@@ -561,9 +584,11 @@ has already wrapped in a `rfcview:section-link-button'."
                        'number num
                        'action (lambda (btn)
                                  (rfcview:nav-push)
-                                 (rfcview:read-rfc (button-get btn 'number)))
+                                 (rfcview:read-rfc
+                                  (button-get btn 'number)))
                        'help-echo (format "RFC %d : %s" num
-                                          (when rfc (plist-get rfc :title))))
+                                          (when rfc
+                                            (plist-get rfc :title))))
           (save-excursion
             (when (looking-back
                    ;; Section A.1 of RFC 1234
@@ -726,8 +751,10 @@ or if the anchor tables are empty."
                                           (re-search-forward stop-regexp nil t))
                                 (let* ((mb (match-beginning 0))
                                        (str (match-string 0))
-                                       (line1 (or (nth 1 (split-string str "\n"))
-                                                  "")))
+                                       (line1
+                                        (or (nth 1
+                                                 (split-string str "\n"))
+                                            "")))
                                   (unless (string-match-p
                                            "[ \t][0-9]+[ \t]*\\'" line1)
                                     (setq found mb))))
@@ -735,15 +762,21 @@ or if the anchor tables are empty."
             (with-silent-modifications
               (while (< (point) toc-end)
                 (let ((extra 0))
+                  ;; Each TOC-format alternative below uses a long single-
+                  ;; line regex literal — its compound title/leader/page
+                  ;; structure does not split cleanly across lines.
                   (cond
-                   ;; Numbered: "   1.2.  Title ............. 7" (title may wrap)
+                   ;; Numbered: "   1.2.  Title .......... 7" (may wrap)
                    ((looking-at
                      "^[ \t]*\\([0-9]+\\(?:\\.[0-9]+\\)*\\)\\.?[ \t]+\\(.+?\\)\\(?:\\(?:\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*\\|[ \t]\\{3,\\}\\)[0-9]+\\)?[ \t]*$")
                     (let* ((num (match-string-no-properties 1))
                            (tb (match-beginning 2))
                            (line1-te (match-end 2))
-                           (target (gethash num rfcview:read-section-anchors-by-number))
-                           (cont (rfcview:read--absorb-toc-continuations tb line1-te toc-end))
+                           (target (gethash
+                                    num
+                                    rfcview:read-section-anchors-by-number))
+                           (cont (rfcview:read--absorb-toc-continuations
+                                  tb line1-te toc-end))
                            (te (car cont)))
                       (setq extra (cdr cont))
                       (when target
@@ -756,24 +789,31 @@ or if the anchor tables are empty."
                     (let* ((num (match-string-no-properties 1))
                            (tb (match-beginning 2))
                            (line1-te (match-end 2))
-                           (target (gethash num rfcview:read-section-anchors-by-number))
-                           (cont (rfcview:read--absorb-toc-continuations tb line1-te toc-end))
+                           (target (gethash
+                                    num
+                                    rfcview:read-section-anchors-by-number))
+                           (cont (rfcview:read--absorb-toc-continuations
+                                  tb line1-te toc-end))
                            (te (car cont)))
                       (setq extra (cdr cont))
                       (when target
                         (rfcview:read--make-section-button tb te target))
                       (rfcview:read--dim-toc-tail line1-te te)))
                    ;; Dash-form appendix subsection (RFC 1001 style):
-                   ;; "   A-1.  Title ............ 61" / "  B-1.1  Title ........ 63".
-                   ;; Placed before the bare-APPENDIX case so the `A`/`B` letter
-                   ;; doesn't get swallowed by Appendix's letter group.
+                   ;; "   A-1.  Title ............ 61" or
+                   ;; "  B-1.1  Title ........ 63".  Placed before the
+                   ;; bare-APPENDIX case so the `A`/`B` letter doesn't get
+                   ;; swallowed by Appendix's letter group.
                    ((looking-at
                      "^[ \t]*\\([A-Z]-[0-9]+\\(?:\\.[0-9]+\\)*\\)\\.?[ \t]+\\(.+?\\)\\(?:\\(?:\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*\\|[ \t]\\{3,\\}\\)[0-9]+\\)?[ \t]*$")
                     (let* ((num (match-string-no-properties 1))
                            (tb (match-beginning 2))
                            (line1-te (match-end 2))
-                           (target (gethash num rfcview:read-section-anchors-by-number))
-                           (cont (rfcview:read--absorb-toc-continuations tb line1-te toc-end))
+                           (target (gethash
+                                    num
+                                    rfcview:read-section-anchors-by-number))
+                           (cont (rfcview:read--absorb-toc-continuations
+                                  tb line1-te toc-end))
                            (te (car cont)))
                       (setq extra (cdr cont))
                       (when target
@@ -783,14 +823,17 @@ or if the anchor tables are empty."
                    ;; The line has no title — just the letter and a page number.
                    ;; The button covers the "APPENDIX X" span.  Must precede the
                    ;; "Appendix [A-Z]. Title" case below, which (under
-                   ;; case-fold-search) would otherwise greedily consume the page
-                   ;; number as the title.
+                   ;; case-fold-search) would otherwise greedily consume
+                   ;; the page number as the title.
                    ((looking-at
                      "^[ \t]*\\(APPENDIX[ \t]+[A-Z]\\)\\(?:\\(?:\\(?:[ \t]*\\.\\)\\{2,\\}[ \t]*\\|[ \t]\\{3,\\}\\)[0-9]+\\)?[ \t]*$")
                     (let* ((tb (match-beginning 1))
                            (te (match-end 1))
-                           (letter (substring (match-string-no-properties 1) -1))
-                           (target (gethash letter rfcview:read-section-anchors-by-number)))
+                           (letter (substring
+                                    (match-string-no-properties 1) -1))
+                           (target (gethash
+                                    letter
+                                    rfcview:read-section-anchors-by-number)))
                       (when target
                         (rfcview:read--make-section-button tb te target))
                       (rfcview:read--dim-toc-tail te)))
@@ -800,8 +843,11 @@ or if the anchor tables are empty."
                     (let* ((letter (match-string-no-properties 1))
                            (tb (match-beginning 2))
                            (line1-te (match-end 2))
-                           (target (gethash letter rfcview:read-section-anchors-by-number))
-                           (cont (rfcview:read--absorb-toc-continuations tb line1-te toc-end))
+                           (target (gethash
+                                    letter
+                                    rfcview:read-section-anchors-by-number))
+                           (cont (rfcview:read--absorb-toc-continuations
+                                  tb line1-te toc-end))
                            (te (car cont)))
                       (setq extra (cdr cont))
                       (when target
@@ -813,8 +859,9 @@ or if the anchor tables are empty."
                     (let* ((title (match-string-no-properties 1))
                            (tb (match-beginning 1))
                            (te (match-end 1))
-                           (target (gethash (rfcview:read--normalize-title title)
-                                            rfcview:read-section-anchors-by-title)))
+                           (target (gethash
+                                    (rfcview:read--normalize-title title)
+                                    rfcview:read-section-anchors-by-title)))
                       (when target
                         (rfcview:read--make-section-button tb te target))
                       (rfcview:read--dim-toc-tail te))))
@@ -1083,78 +1130,83 @@ separator to the next paragraph is preserved."
                      "")))
     (concat (make-string indent ?\s) wrapped trailing)))
 
-(defun rfcview:read--show-translation (beg end translation)
-  "Create or restore the overlay that visually replaces BEG..END with TRANSLATION.
-The original buffer text is not modified; only the display is replaced."
+;; ─── Overlay primitives (shared by paragraph and region tables) ───
+
+(defun rfcview:read--put-overlay (beg end translation table marker)
+  "Create the display overlay over BEG..END showing TRANSLATION.
+TABLE is the hash-table keyed by (cons BEG END); any existing entry is
+deleted first.  MARKER is stored as the overlay's `rfcview:translation'
+property to distinguish paragraph (t) from region (\\='region) overlays."
   (let* ((key (cons beg end))
-         (existing (gethash key rfcview:read-translation-overlays)))
+         (existing (gethash key table)))
     (when (overlayp existing) (delete-overlay existing))
     (let* ((display-text (rfcview:read--wrap-translation beg end translation))
-           (faced (propertize display-text 'face 'rfcview:read-translation-face))
+           (faced (propertize display-text
+                              'face 'rfcview:read-translation-face))
            (ov (make-overlay beg end)))
       (overlay-put ov 'display faced)
       (overlay-put ov 'evaporate t)
-      (overlay-put ov 'rfcview:translation t)
-      (puthash key ov rfcview:read-translation-overlays)
+      (overlay-put ov 'rfcview:translation marker)
+      (puthash key ov table)
       ov)))
 
-(defun rfcview:read--hide-translation (key)
-  "Delete the overlay registered under KEY; the cache entry is untouched."
-  (let ((ov (gethash key rfcview:read-translation-overlays)))
+(defun rfcview:read--drop-overlay (table key)
+  "Delete the overlay at KEY in TABLE (if any); set the entry to nil."
+  (let ((ov (gethash key table)))
     (when (overlayp ov) (delete-overlay ov))
-    (puthash key nil rfcview:read-translation-overlays)))
+    (puthash key nil table)))
 
-(defun rfcview:read--any-overlay-shown-p ()
-  "Return non-nil if at least one translation overlay is currently shown."
+(defun rfcview:read--overlay-shown-p (table)
+  "Return non-nil if TABLE has at least one live overlay."
   (let (found)
-    (when (hash-table-p rfcview:read-translation-overlays)
-      (maphash (lambda (_k v)
-                 (when (overlayp v) (setq found t)))
-               rfcview:read-translation-overlays))
+    (when (hash-table-p table)
+      (maphash (lambda (_k v) (when (overlayp v) (setq found t)))
+               table))
     found))
 
-(defun rfcview:read--hide-all-translations ()
-  "Hide every visible translation overlay (cache preserved)."
-  (when (hash-table-p rfcview:read-translation-overlays)
+(defun rfcview:read--drop-all-overlays (table)
+  "Delete every live overlay in TABLE; cache is untouched."
+  (when (hash-table-p table)
     (let (keys)
       (maphash (lambda (k v) (when (overlayp v) (push k keys)))
-               rfcview:read-translation-overlays)
-      (dolist (k keys) (rfcview:read--hide-translation k)))))
+               table)
+      (dolist (k keys) (rfcview:read--drop-overlay table k)))))
+
+;; ─── Paragraph overlay wrappers ───
+
+(defun rfcview:read--show-translation (beg end translation)
+  "Create or restore the overlay replacing BEG..END with TRANSLATION."
+  (rfcview:read--put-overlay beg end translation
+                             rfcview:read-translation-overlays t))
+
+(defun rfcview:read--hide-translation (key)
+  "Delete the paragraph overlay registered under KEY."
+  (rfcview:read--drop-overlay rfcview:read-translation-overlays key))
+
+(defun rfcview:read--any-overlay-shown-p ()
+  "Return non-nil if at least one paragraph translation overlay is shown."
+  (rfcview:read--overlay-shown-p rfcview:read-translation-overlays))
+
+(defun rfcview:read--hide-all-translations ()
+  "Hide every visible paragraph translation overlay (cache preserved)."
+  (rfcview:read--drop-all-overlays rfcview:read-translation-overlays))
+
+;; ─── Region overlay wrappers ───
+
+(defun rfcview:read--show-region-overlay (beg end translation)
+  "Create the region overlay that visually replaces BEG..END with TRANSLATION.
+Independent of the SINGLE/ALL paragraph overlay table — tracked in
+`rfcview:read--region-overlays' so it can be hidden as a set."
+  (rfcview:read--put-overlay beg end translation
+                             rfcview:read--region-overlays 'region))
 
 (defun rfcview:read--any-region-overlay-p ()
   "Return non-nil if at least one region-translation overlay is showing."
-  (let (found)
-    (when (hash-table-p rfcview:read--region-overlays)
-      (maphash (lambda (_k v) (when (overlayp v) (setq found t)))
-               rfcview:read--region-overlays))
-    found))
+  (rfcview:read--overlay-shown-p rfcview:read--region-overlays))
 
 (defun rfcview:read--hide-all-region-overlays ()
   "Delete every region-translation overlay (cache preserved)."
-  (when (hash-table-p rfcview:read--region-overlays)
-    (let (keys)
-      (maphash (lambda (k v) (when (overlayp v) (push k keys)))
-               rfcview:read--region-overlays)
-      (dolist (k keys)
-        (let ((ov (gethash k rfcview:read--region-overlays)))
-          (when (overlayp ov) (delete-overlay ov))
-          (puthash k nil rfcview:read--region-overlays))))))
-
-(defun rfcview:read--show-region-overlay (beg end translation)
-  "Create the overlay that visually replaces BEG..END with TRANSLATION.
-Independent of the SINGLE/ALL paragraph overlay table — tracked in
-`rfcview:read--region-overlays' so it can be hidden as a set."
-  (let* ((key (cons beg end))
-         (existing (gethash key rfcview:read--region-overlays)))
-    (when (overlayp existing) (delete-overlay existing))
-    (let* ((display-text (rfcview:read--wrap-translation beg end translation))
-           (faced (propertize display-text 'face 'rfcview:read-translation-face))
-           (ov (make-overlay beg end)))
-      (overlay-put ov 'display faced)
-      (overlay-put ov 'evaporate t)
-      (overlay-put ov 'rfcview:translation 'region)
-      (puthash key ov rfcview:read--region-overlays)
-      ov)))
+  (rfcview:read--drop-all-overlays rfcview:read--region-overlays))
 
 (defun rfcview:read--paragraph-chunks-in-range (beg end)
   "Return list of (CBEG . CEND) for each non-blank-line run in BEG..END.
@@ -1518,17 +1570,18 @@ the index buffer has been killed, just bury the reader."
     (let ((inhibit-read-only t))
       (erase-buffer)
       (insert "rfcview\n\n")
-      (insert "  An Emacs tool for browsing, downloading, and reading IETF RFC\n")
-      (insert "  documents. Presents an interactive index with filtering by\n")
-      (insert "  favorites, recents, or keyword search. RFC documents are\n")
-      (insert "  downloaded and cached locally on first access.\n\n")
+      (insert "  An Emacs tool for browsing, downloading, and reading\n")
+      (insert "  IETF RFC documents.  Presents an interactive index with\n")
+      (insert "  filtering by favorites, recents, or keyword search.  RFC\n")
+      (insert "  documents are downloaded and cached locally on first\n")
+      (insert "  access.\n\n")
       (insert "Keybindings\n\n")
       (insert "  Navigation\n")
       (insert "    n / p       next / previous line\n")
       (insert "    b / f       backward / forward char\n")
       (insert "    ] / [       next / previous section\n")
-      (insert "    j           jump to section by number or title\n")
-      (insert "    TAB / S-TAB next / previous link (RFC ref, TOC entry, URL)\n")
+      (insert "    j           jump to section by number/title\n")
+      (insert "    TAB / S-TAB next / previous link (RFC, TOC, URL)\n")
       (insert "    RET         follow link\n")
       (insert "    B / C-c C-b history back (after following a link)\n")
       (insert "    F / C-c C-f history forward\n\n")
@@ -1621,10 +1674,12 @@ run on regions with no overlays yet and be a silent no-op."
     buffer))
 
 (defun rfcview:open-rfc-pdf (number file)
-  "Open locally cached PDF FILE as RFC NUMBER in pdf-view-mode and return the buffer.
+  "Open cached PDF FILE as RFC NUMBER in `pdf-view-mode'; return the buffer.
 Signals an error if pdf-tools is not installed."
   (unless (fboundp 'pdf-view-mode)
-    (error "pdf-tools is not installed; install it to view RFC %04d (PDF only)" number))
+    (error
+     "pdf-tools is not installed; install it to view RFC %04d (PDF only)"
+     number))
   (let* ((buf-name (format "*RFC %04d*" number))
          (buffer (or (get-buffer buf-name)
                      (let ((b (find-file-noselect file)))
@@ -1643,7 +1698,8 @@ not cached locally."
                       rfcview:rfc-base-url number (symbol-name fmt))))
 
 (defun rfcview:download-rfc (number fmt to-file)
-  "Download RFC NUMBER as FMT format to TO-FILE.  Return TO-FILE on success, nil on 404."
+  "Download RFC NUMBER as FMT format to TO-FILE.
+Return TO-FILE on success, nil on 404."
   (message "Downloading RFC%04d (%s)..." number fmt)
   (let ((buf (rfcview:retrieve-rfc number fmt)))
     (if (eql 200 (rfcview:http-response-status buf))
@@ -1654,9 +1710,11 @@ not cached locally."
               (if (eq fmt 'pdf)
                   (progn (forward-line 1)
                          (let ((coding-system-for-write 'binary))
-                           (write-region (point) (point-max) to-file nil 'silent)))
+                           (write-region (point) (point-max)
+                                         to-file nil 'silent)))
                 (delete-region (point-min) (point))
-                (write-region (point-min) (point-max) to-file nil 'silent)))
+                (write-region (point-min) (point-max)
+                              to-file nil 'silent)))
             (kill-buffer buf))
           to-file)
       (kill-buffer buf)
@@ -1672,7 +1730,8 @@ The result is the supported formats that appear in AVAILABLE, with
 PREFERRED first when it is listed.  When PREFERRED is not listed it
 is dropped (the index says it is unavailable).  When nothing supported
 is listed, returns nil — the caller treats that as \"unavailable\"."
-  (seq-intersection (cons preferred (remove preferred rfcview:supported-formats))
+  (seq-intersection (cons preferred
+                          (remove preferred rfcview:supported-formats))
                     (mapcar (lambda (s) (intern (downcase s)))
                             available)))
 

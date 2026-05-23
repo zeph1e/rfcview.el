@@ -23,9 +23,13 @@
 
 (defvar rfcview:filter-keyword-current-result nil)
 
-(defvar rfcview:background-highlight-overlay nil)
+;; ─── Index highlight state ───
 
-(defvar rfcview:margin-highlight-overlays nil)
+(defvar rfcview:background-highlight-overlay nil
+  "Buffer-local overlay covering the currently selected entry.")
+
+(defvar rfcview:margin-highlight-overlays nil
+  "List of per-visual-line overlays painting the margins of the selection.")
 
 (defvar rfcview:index--highlight-prev-prefixes nil
   "Saved wrap-prefix runs for the previously-highlighted entry: a list
@@ -57,63 +61,81 @@ create the cache from scratch."
             end number title authors date trait-begin trait-results)
         (condition-case e
             (progn
-              (setq end (save-excursion (search-forward-regexp "^$" nil t)))
-              (setq number (string-to-number (buffer-substring (line-beginning-position) (point))))
+              (setq end (save-excursion
+                          (search-forward-regexp "^$" nil t)))
+              (setq number
+                    (string-to-number
+                     (buffer-substring (line-beginning-position) (point))))
               (setq title (replace-regexp-in-string
                            "\\s-+" " "
-                           (buffer-substring (point)
-                                             (progn
-                                               (search-forward-regexp "\\.\\s-+" end t)
-                                               (match-beginning 0)))))
-              (setq authors (let (result candidate)
-                              (dolist (auth (split-string
-                                             (replace-regexp-in-string
-                                              "\\s-+" " "
-                                              (buffer-substring (progn
-                                                                  (skip-chars-forward " \r\n")
-                                                                  (point))
-                                                                (progn
-                                                                  (search-forward-regexp
-                                                                   (concat
-                                                                    rfcview:month-name-pattern
-                                                                    "\\s-+[0-9]\\{4\\}") end t)
-                                                                  (search-backward "." nil t)
-                                                                  (point)))) ",\\s-+"))
-                                (if (and (string= auth "Ed.") (stringp candidate))
-                                    (progn
-                                      (push (concat candidate ", Ed.") result)
-                                      (setq candidate nil))
-                                  (if (stringp candidate)
-                                      (push candidate result))
-                                  (setq candidate auth)))
-                              (reverse (if (stringp candidate)
-                                           (push candidate result)
-                                         result))))
-              (setq date (replace-regexp-in-string
-                          "\\s-+" " "
-                          (buffer-substring (search-forward-regexp "\\s-+" end t)
-                                            (search-forward-regexp
-                                             (concat rfcview:month-name-pattern
-                                                     "\\s-+\\([0-9]\\{4\\}\\)") end t))))
+                           (buffer-substring
+                            (point)
+                            (progn
+                              (search-forward-regexp "\\.\\s-+" end t)
+                              (match-beginning 0)))))
+              (setq authors
+                    (let (result candidate)
+                      (dolist (auth (split-string
+                                     (replace-regexp-in-string
+                                      "\\s-+" " "
+                                      (buffer-substring
+                                       (progn
+                                         (skip-chars-forward " \r\n")
+                                         (point))
+                                       (progn
+                                         (search-forward-regexp
+                                          (concat
+                                           rfcview:month-name-pattern
+                                           "\\s-+[0-9]\\{4\\}")
+                                          end t)
+                                         (search-backward "." nil t)
+                                         (point))))
+                                     ",\\s-+"))
+                        (if (and (string= auth "Ed.")
+                                 (stringp candidate))
+                            (progn
+                              (push (concat candidate ", Ed.") result)
+                              (setq candidate nil))
+                          (if (stringp candidate)
+                              (push candidate result))
+                          (setq candidate auth)))
+                      (reverse (if (stringp candidate)
+                                   (push candidate result)
+                                 result))))
+              (setq date
+                    (replace-regexp-in-string
+                     "\\s-+" " "
+                     (buffer-substring
+                      (search-forward-regexp "\\s-+" end t)
+                      (search-forward-regexp
+                       (concat rfcview:month-name-pattern
+                               "\\s-+\\([0-9]\\{4\\}\\)")
+                       end t))))
               (setq trait-begin (search-forward-regexp "\\s-+" end t))
               (setq trait-results
-                    (mapcar (lambda (trait)
-                              (goto-char trait-begin)
-                              (cons (car trait)
-                                    (split-string
-                                     (if (search-forward-regexp (concat "(" (cdr trait)) end t)
-                                         (replace-regexp-in-string
-                                          "\\s-+" " "
-                                          (buffer-substring (point) (1- (search-forward ")" end t))))
-                                       "")
-                                     ",\\s-+" t)))
-                            traits))
+                    (mapcar
+                     (lambda (trait)
+                       (goto-char trait-begin)
+                       (cons (car trait)
+                             (split-string
+                              (if (search-forward-regexp
+                                   (concat "(" (cdr trait)) end t)
+                                  (replace-regexp-in-string
+                                   "\\s-+" " "
+                                   (buffer-substring
+                                    (point)
+                                    (1- (search-forward ")" end t))))
+                                "")
+                              ",\\s-+" t)))
+                     traits))
               (list :number number
                     :title title
                     :authors authors
-                    :format       (mapcar (lambda (s)
-                                            (replace-regexp-in-string "=.*\\'" "" s))
-                                          (cdr (assq 'format trait-results)))
+                    :format       (mapcar
+                                   (lambda (s)
+                                     (replace-regexp-in-string
+                                      "=.*\\'" "" s))
+                                   (cdr (assq 'format trait-results)))
                     :date date
                     :obsoletes    (cdr (assq 'obsoletes    trait-results))
                     :obsoleted-by (cdr (assq 'obsoleted-by trait-results))
@@ -124,7 +146,8 @@ create the cache from scratch."
                                     (unless (string= "UNKNOWN" status)
                                       status))))
           (error (rfcview:debug "parse error in rfc %d %S:\n%S"
-                                number (error-message-string e) (buffer-substring beg end))
+                                number (error-message-string e)
+                                (buffer-substring beg end))
                  (error "Parse index entry error!")))))))
 
 (defun rfcview:parse-index-buffer (buffer)
@@ -132,12 +155,14 @@ create the cache from scratch."
   (rfcview:debug "parsing index buffer %S" buffer)
   (with-current-buffer buffer
     (goto-char (point-min))
-    (let ((last-modified (save-excursion
-                           (goto-char (point-min))
-                           (unless (eq (point-min) (point-max))
-                             (if (search-forward-regexp "^Last-Modified: " nil t)
-                                 (date-to-time
-                                  (buffer-substring (1+ (point)) (line-end-position)))))))
+    (let ((last-modified
+           (save-excursion
+             (goto-char (point-min))
+             (unless (eq (point-min) (point-max))
+               (if (search-forward-regexp "^Last-Modified: " nil t)
+                   (date-to-time
+                    (buffer-substring (1+ (point))
+                                      (line-end-position)))))))
           (rfc-table (make-hash-table :test 'equal))
           (continue t)
           entry)
@@ -152,12 +177,14 @@ create the cache from scratch."
 (defun rfcview:index-updated-p ()
   "Check if rfc-index has been updated."
   (with-current-buffer (rfcview:retrieve-index "HEAD")
-    (let ((last-modified (progn
-                           (goto-char (point-min))
-                           (unless (eq (point-min) (point-max))
-                             (if (search-forward-regexp "^Last-Modified: " nil t)
-                                 (parse-time-string
-                                  (buffer-substring (1+ (point)) (line-end-position))))))))
+    (let ((last-modified
+           (progn
+             (goto-char (point-min))
+             (unless (eq (point-min) (point-max))
+               (if (search-forward-regexp "^Last-Modified: " nil t)
+                   (parse-time-string
+                    (buffer-substring (1+ (point))
+                                      (line-end-position))))))))
       (time-less-p (plist-get rfcview:rfc-cache :last-modified)
                    last-modified))))
 
@@ -168,63 +195,87 @@ create the cache from scratch."
     (with-current-buffer (rfcview:retrieve-index)
       (let ((parsed (rfcview:parse-index-buffer (current-buffer))))
         (setq rfcview:rfc-cache
-              (plist-put rfcview:rfc-cache :last-modified (plist-get parsed :last-modified)))
+              (plist-put rfcview:rfc-cache :last-modified
+                         (plist-get parsed :last-modified)))
         (setq rfcview:rfc-cache
-              (plist-put rfcview:rfc-cache :table (plist-get parsed :table))))
+              (plist-put rfcview:rfc-cache :table
+                         (plist-get parsed :table))))
       (rfcview:save-cache)
       (kill-buffer (current-buffer)))))
 
 (defun rfcview:make-entry-line (number title date authors obsoletes obsoleted-by
                                        updates updated-by favorite)
   "Make a propertized line containing a single RFC document information."
-  (let* ((lmw (let ((v (if (and (boundp 'left-margin-width) left-margin-width)
+  (let* ((lmw (let ((v (if (and (boundp 'left-margin-width)
+                                 left-margin-width)
                             left-margin-width 0)))
                 (if (> v 0) v 5)))
          (margin-width 2)
          (margin (make-string margin-width ?\s))
          (num-display (format (format "%%%ds" lmw) number))
-         (num-carrier (propertize " " 'display
-                                  `((margin left-margin)
-                                    ,(if rfcview:use-face
-                                         (propertize num-display 'face 'rfcview:rfc-number-face)
-                                       num-display))))
+         (num-carrier
+          (propertize " " 'display
+                      `((margin left-margin)
+                        ,(if rfcview:use-face
+                             (propertize num-display
+                                         'face 'rfcview:rfc-number-face)
+                           num-display))))
          (traits (list (list :var obsoletes :text "Obsoletes")
                        (list :var obsoleted-by :text "Obsoleted by")
                        (list :var updates :text "Updates")
                        (list :var updated-by :text "Updated by")))
          parts)
 
-    (when (and rfcview:use-debug (eq rfcview:index-filter 'rfcview:index-filter-function-keywords))
-      (setq title (concat title (format " (relevance: %d)"
-                                        (cdr (assoc number rfcview:filter-keyword-current-result))))))
+    (when (and rfcview:use-debug
+               (eq rfcview:index-filter
+                   'rfcview:index-filter-function-keywords))
+      (setq title
+            (concat title
+                    (format
+                     " (relevance: %d)"
+                     (cdr (assoc number
+                                 rfcview:filter-keyword-current-result))))))
 
-    (let* ((fav-str (format "%c " (if favorite rfcview:favorite-symbol ?\s)))
+    (let* ((fav-str (format "%c " (if favorite
+                                      rfcview:favorite-symbol ?\s)))
            (text-beg (1+ (length fav-str)))
-           (margin-display (propertize " " 'display `((margin right-margin) " ")))
-           (title-str (concat num-carrier fav-str title margin-display "\n")))
+           (margin-display (propertize " " 'display
+                                       `((margin right-margin) " ")))
+           (title-str (concat num-carrier fav-str title
+                              margin-display "\n")))
       (put-text-property 0 (length title-str) 'wrap-prefix margin title-str)
       (when rfcview:use-face
-        (put-text-property 1 text-beg 'face 'rfcview:rfc-number-face title-str)
-        (put-text-property text-beg (1- (length title-str)) 'face 'rfcview:rfc-title-face title-str)
-        (when (eq rfcview:index-filter 'rfcview:index-filter-function-keywords)
+        (put-text-property 1 text-beg
+                           'face 'rfcview:rfc-number-face title-str)
+        (put-text-property text-beg (1- (length title-str))
+                           'face 'rfcview:rfc-title-face title-str)
+        (when (eq rfcview:index-filter
+                  'rfcview:index-filter-function-keywords)
           (let ((case-fold-search t))
-            (dolist (keyword (split-string rfcview:filter-keyword-current-keyword nil t))
+            (dolist (keyword
+                     (split-string
+                      rfcview:filter-keyword-current-keyword nil t))
               (let ((pos text-beg))
                 (while (string-match (regexp-quote keyword) title-str pos)
                   (put-text-property (match-beginning 0) (match-end 0)
-                                     'face 'rfcview:rfc-selected-filter-face title-str)
+                                     'face
+                                     'rfcview:rfc-selected-filter-face
+                                     title-str)
                   (setq pos (match-end 0))))))))
       (push title-str parts))
 
     (let* ((author-text (mapconcat #'identity authors ", "))
            (date-str (if rfcview:use-face
-                         (propertize (format "%15s" date) 'face 'rfcview:rfc-date-face)
+                         (propertize (format "%15s" date)
+                                     'face 'rfcview:rfc-date-face)
                        (format "%15s" date)))
-           (date-display (propertize " " 'display `((margin right-margin) ,date-str)))
+           (date-display (propertize " " 'display
+                                     `((margin right-margin) ,date-str)))
            (line (concat margin date-display author-text "\n")))
       (put-text-property 0 (length line) 'wrap-prefix margin line)
       (when rfcview:use-face
-        (put-text-property (1+ margin-width) (1- (length line)) 'face 'rfcview:rfc-authors-face line))
+        (put-text-property (1+ margin-width) (1- (length line))
+                           'face 'rfcview:rfc-authors-face line))
       (push line parts))
 
     (let (trait-parts)
@@ -238,7 +289,8 @@ create the cache from scratch."
               (put-text-property 0 (length line) 'wrap-prefix
                                  (make-string (length prefix) ?\s) line)
               (when rfcview:use-face
-                (put-text-property 0 (length line) 'face 'rfcview:rfc-traits-face line))
+                (put-text-property 0 (length line)
+                                   'face 'rfcview:rfc-traits-face line))
               (push line trait-parts)))))
       (dolist (p (nreverse trait-parts)) (push p parts)))
 
@@ -256,7 +308,8 @@ create the cache from scratch."
           plist (plist-put plist 'rfcview:number number)
           plist (plist-put plist 'follow-link
                            (lambda (pos)
-                             (let ((number (get-text-property pos 'rfcview:number)))
+                             (let ((number (get-text-property
+                                            pos 'rfcview:number)))
                                (when number
                                  (rfcview:index-read-item number))))))
     (add-text-properties beg end plist)
@@ -272,6 +325,24 @@ create the cache from scratch."
                             'type 'rfcview:rfc-link-button
                             'action 'rfcview:rfc-link-button-action
                             'help-echo (plist-get rfc :title)))))))
+
+(defun rfcview:insert-entry (number entry)
+  "Render the entry plist ENTRY for RFC NUMBER and insert it at point.
+Pulls each field from ENTRY, calls `rfcview:make-entry-line', and applies
+text properties via `rfcview:insert-with-text-properties'.  Does not
+append a trailing newline — callers add one when needed."
+  (rfcview:insert-with-text-properties
+   (rfcview:make-entry-line
+    number
+    (plist-get entry :title)
+    (plist-get entry :date)
+    (plist-get entry :authors)
+    (plist-get entry :obsoletes)
+    (plist-get entry :obsoleted-by)
+    (plist-get entry :updates)
+    (plist-get entry :updated-by)
+    (member number (plist-get rfcview:rfc-cache :favorite)))
+   number))
 
 (defun rfcview:maphash-with-filter (function table &optional filter)
   ;; rfcview:index-sort-order only applies to All (filter=nil) and Favorites;
@@ -297,11 +368,15 @@ create the cache from scratch."
 (defun rfcview:refresh-header-line ()
   (setq header-line-format
         '("RFC INDEX"
-          (:eval (let ((date (concat "Last Modified: "
-                                     (current-time-string
-                                      (plist-get rfcview:rfc-cache :last-modified)))))
-                   (concat (propertize " " 'display
-                                       `(space :align-to (- right ,(1+ (length date)))))
+          (:eval (let ((date (concat
+                              "Last Modified: "
+                              (current-time-string
+                               (plist-get rfcview:rfc-cache
+                                          :last-modified)))))
+                   (concat (propertize
+                            " " 'display
+                            `(space :align-to
+                                    (- right ,(1+ (length date)))))
                            date))))))
 
 (defun rfcview:get-filter-name (filter)
@@ -317,48 +392,64 @@ create the cache from scratch."
         (history-header "Search history: ")
         (history-margin 4)
         (filter-name (rfcview:get-filter-name rfcview:index-filter))
-        (filters (remove rfcview:index-filter '(nil
-                                                rfcview:index-filter-function-favorite
-                                                rfcview:index-filter-function-recent)))
+        (filters (remove rfcview:index-filter
+                         '(nil
+                           rfcview:index-filter-function-favorite
+                           rfcview:index-filter-function-recent)))
         end)
-    (insert filter-header
-            (rfcview:wrap-text-at-word-boundary
-             (concat (propertize filter-name 'face 'rfcview:rfc-selected-filter-face) " "
-                     (mapconcat (lambda (f)
-                                  (propertize (rfcview:get-filter-name f) 'filter f))
-                                filters "'")
-                     "'"
-                     (propertize "[Search Keywords]" 'filter ""))
-             (length filter-header) max-width "'")
-            (if (> (- (length rfcview:filter-keywords-history)
-                        (if (and (eq rfcview:index-filter 'rfcview:index-filter-function-keywords)
-                                 (assoc rfcview:filter-keyword-current-keyword
-                                        rfcview:filter-keywords-history)) 1 0)) 0)
-              (concat
-               "\n" history-header "\n"
-               (make-string history-margin ?\s)
-               (rfcview:wrap-text-at-word-boundary
-                (concat (mapconcat (lambda (history)
-                                     (unless (string= rfcview:filter-keyword-current-keyword
-                                                      (car history))
-                                       (let ((rfcview:filter-keyword-current-keyword (car history)))
-                                         (propertize
-                                          (rfcview:get-filter-name 'rfcview:index-filter-function-keywords)
-                                          'filter (car history)))))
-                                   rfcview:filter-keywords-history "'"))
-                history-margin max-width "'")) "")
-            "\n")
+    (insert
+     filter-header
+     (rfcview:wrap-text-at-word-boundary
+      (concat (propertize filter-name
+                          'face 'rfcview:rfc-selected-filter-face)
+              " "
+              (mapconcat (lambda (f)
+                           (propertize (rfcview:get-filter-name f)
+                                       'filter f))
+                         filters "'")
+              "'"
+              (propertize "[Search Keywords]" 'filter ""))
+      (length filter-header) max-width "'")
+     (if (> (- (length rfcview:filter-keywords-history)
+               (if (and (eq rfcview:index-filter
+                            'rfcview:index-filter-function-keywords)
+                        (assoc rfcview:filter-keyword-current-keyword
+                               rfcview:filter-keywords-history))
+                   1 0))
+            0)
+         (concat
+          "\n" history-header "\n"
+          (make-string history-margin ?\s)
+          (rfcview:wrap-text-at-word-boundary
+           (concat
+            (mapconcat
+             (lambda (history)
+               (unless (string= rfcview:filter-keyword-current-keyword
+                                (car history))
+                 (let ((rfcview:filter-keyword-current-keyword
+                        (car history)))
+                   (propertize
+                    (rfcview:get-filter-name
+                     'rfcview:index-filter-function-keywords)
+                    'filter (car history)))))
+             rfcview:filter-keywords-history "'"))
+           history-margin max-width "'"))
+       "")
+     "\n")
     (setq end (point))
     (save-excursion
       (goto-char beg)
-      (when (search-forward-regexp (format "%s\\[[^\]]+\\] " filter-header) end 'noerror)
+      (when (search-forward-regexp
+             (format "%s\\[[^\]]+\\] " filter-header) end 'noerror)
         (setq beg (point))
         (while (search-forward-regexp "\\[[^\]]+\\]" nil 'noerror)
           (setq end (point))
           (make-button beg end
                        'type 'rfcview:rfc-link-button
                        'action 'rfcview:filter-button-action)
-          (search-forward-regexp (concat "\\(\\s-\\|" (regexp-quote history-header) "\\)+") nil 'noerror)
+          (search-forward-regexp
+           (concat "\\(\\s-\\|" (regexp-quote history-header) "\\)+")
+           nil 'noerror)
           (setq beg (point)))))))
 
 (defun rfcview:index-apply-window-settings ()
@@ -372,25 +463,29 @@ create the cache from scratch."
   "Refresh RFC index."
   (rfcview:debug "refreshing...")
   (let* ((rfcview--index-table (plist-get rfcview:rfc-cache :table))
-         (rfcview--max-rfc (if (hash-table-p rfcview--index-table)
-                               (let ((mx 0))
-                                 (maphash (lambda (k _) (when (> k mx) (setq mx k)))
-                                          rfcview--index-table)
-                                 mx)
-                             9999)))
-    (setq left-margin-width (1+ (length (number-to-string rfcview--max-rfc))))
+         (rfcview--max-rfc
+          (if (hash-table-p rfcview--index-table)
+              (let ((mx 0))
+                (maphash (lambda (k _) (when (> k mx) (setq mx k)))
+                         rfcview--index-table)
+                mx)
+            9999)))
+    (setq left-margin-width
+          (1+ (length (number-to-string rfcview--max-rfc))))
     (rfcview:index-apply-window-settings))
   ;; Entries are rebuilt below, so saved wrap-prefix tuples point at stale
   ;; positions / strings — clear them before the next `move-entry-highlight'
   ;; tries to restore over the new buffer contents.
   (setq rfcview:index--highlight-prev-prefixes nil)
   (let ((inhibit-read-only t)
-        (saved-point (unless rfcview:suppress-recover-position
-                       (save-excursion
-                         (backward-paragraph)
-                         (get-text-property (or (next-single-property-change (point) 'rfcview:number)
-                                                (point-min))
-                                            'rfcview:number)))))
+        (saved-point
+         (unless rfcview:suppress-recover-position
+           (save-excursion
+             (backward-paragraph)
+             (get-text-property (or (next-single-property-change
+                                     (point) 'rfcview:number)
+                                    (point-min))
+                                'rfcview:number)))))
     (rfcview:debug "saved-point=%S" saved-point)
     (save-excursion
       (erase-buffer)
@@ -398,21 +493,12 @@ create the cache from scratch."
       (rfcview:refresh-filter-line (window-body-width))
       (insert (propertize "\n" 'rfcview:number 0))
       (when (hash-table-p (plist-get rfcview:rfc-cache :table))
-        (rfcview:maphash-with-filter (lambda (number data)
-                                       (rfcview:insert-with-text-properties
-                                        (rfcview:make-entry-line number
-                                                                 (plist-get data :title)
-                                                                 (plist-get data :date)
-                                                                 (plist-get data :authors)
-                                                                 (plist-get data :obsoletes)
-                                                                 (plist-get data :obsoleted-by)
-                                                                 (plist-get data :updates)
-                                                                 (plist-get data :updated-by)
-                                                                 (member number (plist-get rfcview:rfc-cache :favorite)))
-                                        number)
-                                       (insert "\n"))
-                                     (plist-get rfcview:rfc-cache :table)
-                                     rfcview:index-filter)))
+        (rfcview:maphash-with-filter
+         (lambda (number data)
+           (rfcview:insert-entry number data)
+           (insert "\n"))
+         (plist-get rfcview:rfc-cache :table)
+         rfcview:index-filter)))
     (ignore-errors (rfcview:index-goto-number saved-point))))
 
 (defun rfcview:rfc-link-button-action (btn)
@@ -470,17 +556,7 @@ create the cache from scratch."
       (setq end (next-single-property-change beg 'rfcview:number))
       (delete-region beg end)
       (goto-char beg)
-      (rfcview:insert-with-text-properties
-       (rfcview:make-entry-line number
-                                (plist-get entry :title)
-                                (plist-get entry :date)
-                                (plist-get entry :authors)
-                                (plist-get entry :obsoletes)
-                                (plist-get entry :obsoleted-by)
-                                (plist-get entry :updates)
-                                (plist-get entry :updated-by)
-                                (member number (plist-get rfcview:rfc-cache :favorite)))
-       number))))
+      (rfcview:insert-entry number entry))))
 
 (defun rfcview:index-forward-item ()
   (interactive)
@@ -532,15 +608,18 @@ Returns a list of (POS NEXT ORIGINAL-WP) tuples for later restoration."
       (let ((pos beg))
         (while (and pos (< pos end))
           (let ((wp   (get-text-property pos 'wrap-prefix))
-                (next (or (next-single-property-change pos 'wrap-prefix nil end)
+                (next (or (next-single-property-change
+                           pos 'wrap-prefix nil end)
                           end)))
             (when (stringp wp)
               (push (list pos next wp) saved)
               (let* ((margin-bg
-                      (propertize " " 'display
-                                  `((margin left-margin)
-                                    ,(propertize (make-string lmw ?\s)
-                                                 'face 'rfcview:entry-highlight-face))))
+                      (propertize
+                       " " 'display
+                       `((margin left-margin)
+                         ,(propertize
+                           (make-string lmw ?\s)
+                           'face 'rfcview:entry-highlight-face))))
                      (text-prefix
                       (propertize wp 'face 'rfcview:entry-highlight-face))
                      (new-wp (concat margin-bg text-prefix)))
@@ -566,14 +645,16 @@ Returns a list of (POS NEXT ORIGINAL-WP) tuples for later restoration."
   (when (boundp 'rfcview:background-highlight-overlay)
     (unless (overlayp rfcview:background-highlight-overlay)
       (setq rfcview:background-highlight-overlay (make-overlay 0 0))
-      (overlay-put rfcview:background-highlight-overlay 'face 'rfcview:entry-highlight-face))
+      (overlay-put rfcview:background-highlight-overlay
+                   'face 'rfcview:entry-highlight-face))
     (mapc #'delete-overlay rfcview:margin-highlight-overlays)
     (setq rfcview:margin-highlight-overlays nil)
     (let* ((at (save-excursion
                  (backward-paragraph)
                  (point)))
            (beg (next-single-property-change at  'rfcview:number))
-           (end (and beg (next-single-property-change beg 'rfcview:number))))
+           (end (and beg (next-single-property-change
+                          beg 'rfcview:number))))
       (unless beg (setq beg (point-min) end (point-min)))
       (when (or (and (number-or-marker-p beg)
                      (eq 0 (get-text-property beg 'rfcview:number)))
@@ -589,7 +670,8 @@ Returns a list of (POS NEXT ORIGINAL-WP) tuples for later restoration."
       ;; text-area indent is highlighted at its original width — title/authors
       ;; stay at the 2-space margin, traits keep their wider value-column
       ;; offset).
-      (rfcview:index--revert-highlight-wrap-prefix rfcview:index--highlight-prev-prefixes)
+      (rfcview:index--revert-highlight-wrap-prefix
+       rfcview:index--highlight-prev-prefixes)
       (setq rfcview:index--highlight-prev-prefixes nil)
       (when (< beg end)
         (setq rfcview:index--highlight-prev-prefixes
@@ -610,10 +692,13 @@ Returns a list of (POS NEXT ORIGINAL-WP) tuples for later restoration."
                         (at-bol   (bolp)))
                     (end-of-visual-line)
                     (let ((ov-r (make-overlay (point) (point))))
-                      (overlay-put ov-r 'after-string
-                                   (propertize " " 'display
-                                               `((margin right-margin)
-                                                 ,(propertize " " 'face 'rfcview:entry-highlight-face))))
+                      (overlay-put
+                       ov-r 'after-string
+                       (propertize
+                        " " 'display
+                        `((margin right-margin)
+                          ,(propertize
+                            " " 'face 'rfcview:entry-highlight-face))))
                       (push ov-r rfcview:margin-highlight-overlays))
                     (cond
                      ;; First visual line of the entry: override the carrier
@@ -623,30 +708,38 @@ Returns a list of (POS NEXT ORIGINAL-WP) tuples for later restoration."
                      ;; push the number beyond the margin width.
                      ((eq line-beg beg)
                       (let* ((num (get-text-property beg 'rfcview:number))
-                             (num-str (format (format "%%%ds" lmw) (or num "")))
+                             (num-str (format (format "%%%ds" lmw)
+                                              (or num "")))
                              (ov-l (make-overlay beg (1+ beg))))
-                        (overlay-put ov-l 'display
-                                     `((margin left-margin)
-                                       ,(propertize num-str
-                                                    'face (if rfcview:use-face
-                                                              '(rfcview:rfc-number-face rfcview:entry-highlight-face)
-                                                            'rfcview:entry-highlight-face))))
+                        (overlay-put
+                         ov-l 'display
+                         `((margin left-margin)
+                           ,(propertize
+                             num-str
+                             'face (if rfcview:use-face
+                                       '(rfcview:rfc-number-face
+                                         rfcview:entry-highlight-face)
+                                     'rfcview:entry-highlight-face))))
                         (push ov-l rfcview:margin-highlight-overlays)))
                      ;; First visual line of a subsequent logical line
                      ;; (authors, traits): no carrier here, so a zero-width
                      ;; before-string places highlighted spaces in the margin.
                      ;; Wrap-continuation visual lines are NOT handled here —
                      ;; their margin is covered by the wrap-prefix margin
-                     ;; redirect installed by `rfcview:index--apply-highlight-wrap-prefix'
-                     ;; and handling them here too would stack two margin
+                     ;; redirect installed by
+                     ;; `rfcview:index--apply-highlight-wrap-prefix' and
+                     ;; handling them here too would stack two margin
                      ;; glyphs at the same position.
                      (at-bol
                       (let ((ov-l (make-overlay line-beg line-beg)))
-                        (overlay-put ov-l 'before-string
-                                     (propertize " " 'display
-                                                 `((margin left-margin)
-                                                   ,(propertize (make-string lmw ?\s)
-                                                                'face 'rfcview:entry-highlight-face))))
+                        (overlay-put
+                         ov-l 'before-string
+                         (propertize
+                          " " 'display
+                          `((margin left-margin)
+                            ,(propertize
+                              (make-string lmw ?\s)
+                              'face 'rfcview:entry-highlight-face))))
                         (push ov-l rfcview:margin-highlight-overlays))))
                     (vertical-motion 1)))))))))))
 
@@ -656,7 +749,8 @@ Returns a list of (POS NEXT ORIGINAL-WP) tuples for later restoration."
                    (let* ((at (save-excursion
                                 (backward-paragraph)
                                 (point)))
-                          (target (next-single-property-change at 'rfcview:number)))
+                          (target (next-single-property-change
+                                   at 'rfcview:number)))
                      (get-text-property target 'rfcview:number))))
   (let ((recent (remove number (plist-get rfcview:rfc-cache :recent))))
     (when (> (length recent) rfcview:recent-max-count)
@@ -669,7 +763,8 @@ Returns a list of (POS NEXT ORIGINAL-WP) tuples for later restoration."
 (defun rfcview:index-toggle-favorite ()
   (interactive)
   (let* ((number (or (get-text-property (point) 'rfcview:number)
-                     (read-from-minibuffer "Enter RFC number to toggle favorite: ")))
+                     (read-from-minibuffer
+                      "Enter RFC number to toggle favorite: ")))
          (favorite (plist-get rfcview:rfc-cache :favorite)))
     (if (member number favorite)
         (progn
@@ -686,9 +781,11 @@ Applies to the All and Favorites views only.  Recents preserves
 chronological order; Keywords preserves relevance-score order."
   (interactive)
   (setq rfcview:index-sort-order
-        (if (eq rfcview:index-sort-order 'ascending) 'descending 'ascending))
+        (if (eq rfcview:index-sort-order 'ascending)
+            'descending 'ascending))
   (message "RFC index sort order: %s (applies to All / Favorites)"
-           (if (eq rfcview:index-sort-order 'ascending) "ascending" "descending"))
+           (if (eq rfcview:index-sort-order 'ascending)
+               "ascending" "descending"))
   (rfcview:index-refresh-screen))
 
 (defun rfcview:index-apply-filter-all ()
@@ -716,10 +813,11 @@ chronological order; Keywords preserves relevance-score order."
     (let ((inhibit-read-only t))
       (erase-buffer)
       (insert "rfcview\n\n")
-      (insert "  An Emacs tool for browsing, downloading, and reading IETF RFC\n")
-      (insert "  documents. Presents an interactive index with filtering by\n")
-      (insert "  favorites, recents, or keyword search. RFC documents are\n")
-      (insert "  downloaded and cached locally on first access.\n\n")
+      (insert "  An Emacs tool for browsing, downloading, and reading\n")
+      (insert "  IETF RFC documents.  Presents an interactive index with\n")
+      (insert "  filtering by favorites, recents, or keyword search.  RFC\n")
+      (insert "  documents are downloaded and cached locally on first\n")
+      (insert "  access.\n\n")
       (insert "Keybindings\n\n")
       (insert "  Navigation\n")
       (insert "    n / p       next / previous entry\n")
@@ -735,8 +833,9 @@ chronological order; Keywords preserves relevance-score order."
       (insert "  Other\n")
       (insert "    v           toggle favorite\n")
       (insert "    s           toggle sort order (asc / desc by RFC number)\n")
-      (insert "                (applies to All / Favorites only; Recents stays\n")
-      (insert "                chronological, Keywords stays score-ranked)\n")
+      (insert "                (applies to All / Favorites only; Recents\n")
+      (insert "                stays chronological, Keywords stays\n")
+      (insert "                score-ranked)\n")
       (insert "    g           refresh\n")
       (insert "    q           quit\n")
       (insert "    ?           this help\n"))
@@ -746,10 +845,12 @@ chronological order; Keywords preserves relevance-score order."
 
 (defun rfcview:index-apply-filter-keywords (&optional keywords)
   (interactive)
-  (setq keywords (or (and (stringp keywords) (> (length keywords) 0) keywords)
-                    (mapconcat (lambda (s) s)
-                           (split-string (read-from-minibuffer "Keywords: ") "[ \t\n\r\v']")
-                           " ")))
+  (setq keywords
+        (or (and (stringp keywords) (> (length keywords) 0) keywords)
+            (mapconcat (lambda (s) s)
+                       (split-string (read-from-minibuffer "Keywords: ")
+                                     "[ \t\n\r\v']")
+                       " ")))
   (when rfcview:filter-keyword-current-keyword
       (add-to-list 'rfcview:filter-keywords-history
                    (cons rfcview:filter-keyword-current-keyword
@@ -764,34 +865,44 @@ chronological order; Keywords preserves relevance-score order."
   (let ((rfcview:suppress-recover-position t))
     (rfcview:index-refresh-screen)))
 
-;; (("keywordA" . '((1 . 33) (59 . 92) (205 . 88) (3333 . 87)...) --> (number . score)
-;;  ("keywrodB" . '(....))
-;; ...)
 (defun rfcview:index-filter-function-keywords ()
   ;; Additive, case-insensitive, multi-field scoring:
-  ;;   RFC# exact match: +500  phrase in title: +200  all-word-match in title: +100
-  ;;   per keyword: title word +20, title sub +5, author word +15, author sub +5, status sub +5
-  (let ((history (assoc rfcview:filter-keyword-current-keyword rfcview:filter-keywords-history)))
+  ;;   RFC# exact:  +500
+  ;;   phrase in title: +200
+  ;;   all-keywords whole-word in title: +100
+  ;;   per keyword: title word +20, title sub +5,
+  ;;                author word +15, author sub +5, status sub +5
+  ;; History entry shape:
+  ;;   ("keywords" . ((rfc-number . score) ...))
+  (let ((history (assoc rfcview:filter-keyword-current-keyword
+                        rfcview:filter-keywords-history)))
     (if history
         (mapcar (lambda (e) (car e)) (cdr history))
       (setq rfcview:filter-keyword-current-result nil)
-      (let* ((keywords (split-string (downcase rfcview:filter-keyword-current-keyword) "\\s-+" t))
+      (let* ((keywords (split-string
+                        (downcase rfcview:filter-keyword-current-keyword)
+                        "\\s-+" t))
              (kw-patterns (mapcar (lambda (kw)
-                                    (cons kw (concat "\\(?:^\\|\\W\\)"
-                                                     (regexp-quote kw)
-                                                     "\\(?:\\W\\|$\\)")))
+                                    (cons kw
+                                          (concat "\\(?:^\\|\\W\\)"
+                                                  (regexp-quote kw)
+                                                  "\\(?:\\W\\|$\\)")))
                                   keywords))
-             (phrase-pat (when (> (length kw-patterns) 1)
-                           (concat "\\(?:^\\|\\W\\)"
-                                   (mapconcat (lambda (p) (regexp-quote (car p)))
-                                              kw-patterns "\\W+")
-                                   "\\(?:\\W\\|$\\)"))))
+             (phrase-pat
+              (when (> (length kw-patterns) 1)
+                (concat "\\(?:^\\|\\W\\)"
+                        (mapconcat (lambda (p)
+                                     (regexp-quote (car p)))
+                                   kw-patterns "\\W+")
+                        "\\(?:\\W\\|$\\)"))))
         (maphash
          (lambda (key value)
            (let* ((title   (downcase (or (plist-get value :title) "")))
-                  (authors (downcase (mapconcat #'identity
-                                                (or (plist-get value :authors) '())
-                                                " ")))
+                  (authors (downcase
+                            (mapconcat #'identity
+                                       (or (plist-get value :authors)
+                                           '())
+                                       " ")))
                   (status  (downcase (or (plist-get value :status) "")))
                   (score 0))
              ;; RFC number exact match
@@ -812,10 +923,14 @@ chronological order; Keywords preserves relevance-score order."
              (dolist (pair kw-patterns)
                (let ((kw (car pair))
                      (wp (cdr pair)))
-                 (cond ((string-match-p wp title)            (setq score (+ score 20)))
-                       ((string-match-p (regexp-quote kw) title) (setq score (+ score 5))))
-                 (cond ((string-match-p wp authors)          (setq score (+ score 15)))
-                       ((string-match-p (regexp-quote kw) authors) (setq score (+ score 5))))
+                 (cond ((string-match-p wp title)
+                        (setq score (+ score 20)))
+                       ((string-match-p (regexp-quote kw) title)
+                        (setq score (+ score 5))))
+                 (cond ((string-match-p wp authors)
+                        (setq score (+ score 15)))
+                       ((string-match-p (regexp-quote kw) authors)
+                        (setq score (+ score 5))))
                  (when (string-match-p (regexp-quote kw) status)
                    (setq score (+ score 5)))))
              (when (> score 0)
@@ -835,15 +950,7 @@ chronological order; Keywords preserves relevance-score order."
 (defun rfcview:index-filter-function-recent ()
   (plist-get rfcview:rfc-cache :recent))
 
-(defun rfcview:index-cleanup ()
-  (rfcview:save-cache)
-  (with-current-buffer (get-buffer "*RFC INDEX*")
-    (when (overlayp rfcview:background-highlight-overlay)
-      (delete-overlay rfcview:background-highlight-overlay))
-    (mapc #'delete-overlay rfcview:margin-highlight-overlays)
-    (setq rfcview:margin-highlight-overlays nil
-          rfcview:index--highlight-prev-prefixes nil))
-  (setq rfcview:rfc-cache nil))
+;; ─── Index mode ───
 
 (defun rfcview:index-mode ()
   "Major mode to list RFC documents.
@@ -864,8 +971,21 @@ Keybindings:
   (add-hook 'kill-buffer-hook 'rfcview:index-cleanup t t)
   (add-hook 'kill-emacs-hook 'rfcview:index-cleanup)
   (add-hook 'post-command-hook 'rfcview:move-entry-highlight t t)
-  (add-hook 'window-configuration-change-hook 'rfcview:index-apply-window-settings nil t)
+  (add-hook 'window-configuration-change-hook
+            'rfcview:index-apply-window-settings nil t)
   (run-hooks 'rfcview:index-mode-hook))
+
+(defun rfcview:index-cleanup ()
+  "Persist cache and tear down per-buffer highlight overlays.
+Registered on `kill-buffer-hook' (buffer-local) and `kill-emacs-hook'."
+  (rfcview:save-cache)
+  (with-current-buffer (get-buffer "*RFC INDEX*")
+    (when (overlayp rfcview:background-highlight-overlay)
+      (delete-overlay rfcview:background-highlight-overlay))
+    (mapc #'delete-overlay rfcview:margin-highlight-overlays)
+    (setq rfcview:margin-highlight-overlays nil
+          rfcview:index--highlight-prev-prefixes nil))
+  (setq rfcview:rfc-cache nil))
 
 (provide 'rfcview-index)
 ;;; rfcview-index.el ends here
