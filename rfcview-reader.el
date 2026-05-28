@@ -216,6 +216,10 @@ it locally.")
     (define-key map (kbd "F") 'rfcview:read-history-forward)
     (define-key map (kbd "C-c C-b") 'rfcview:read-history-back)
     (define-key map (kbd "C-c C-f") 'rfcview:read-history-forward)
+    (define-key map (kbd "<mouse-8>") 'rfcview:read-history-back)
+    (define-key map (kbd "<mouse-9>") 'rfcview:read-history-forward)
+    (define-key map (kbd "<drag-mouse-8>") 'rfcview:read-history-back)
+    (define-key map (kbd "<drag-mouse-9>") 'rfcview:read-history-forward)
 
     ;; font scale
     (define-key map [(?0)] 'text-scale-adjust)
@@ -1078,27 +1082,72 @@ with newlines and per-line indentation; sending it to Google Translate
 as-is confuses the segmentation, so this normalisation runs first."
   (string-trim (replace-regexp-in-string "[ \t\n\r\v\f]+" " " text)))
 
+(defun rfcview:read--cjk-no-space-char-p (ch)
+  "Return non-nil if CH belongs to a script that wraps without spaces.
+Hangul is excluded — Korean uses spaces between words, so its natural
+break points are whitespace, same as Latin."
+  (or (and (>= ch #x3000) (<= ch #x303F))   ; CJK Symbols and Punctuation
+      (and (>= ch #x3040) (<= ch #x309F))   ; Hiragana
+      (and (>= ch #x30A0) (<= ch #x30FF))   ; Katakana
+      (and (>= ch #x3400) (<= ch #x4DBF))   ; CJK Unified Ideographs Ext A
+      (and (>= ch #x4E00) (<= ch #x9FFF))   ; CJK Unified Ideographs
+      (and (>= ch #xF900) (<= ch #xFAFF))   ; CJK Compatibility Ideographs
+      (and (>= ch #xFF00) (<= ch #xFFEF)))) ; Halfwidth/Fullwidth Forms
+
+(defun rfcview:read--tokenize-for-wrap (text)
+  "Split TEXT into wrap tokens.
+Each run of non-space, non-CJK characters becomes one token; each
+CJK character (Japanese/Chinese, where words have no inter-character
+spaces) becomes its own token."
+  (let ((tokens nil) (i 0) (len (length text)))
+    (while (< i len)
+      (let ((ch (aref text i)))
+        (cond
+         ((memq ch '(?\s ?\t))
+          (setq i (1+ i)))
+         ((rfcview:read--cjk-no-space-char-p ch)
+          (push (char-to-string ch) tokens)
+          (setq i (1+ i)))
+         (t
+          (let ((start i))
+            (while (and (< i len)
+                        (let ((c (aref text i)))
+                          (not (or (memq c '(?\s ?\t))
+                                   (rfcview:read--cjk-no-space-char-p c)))))
+              (setq i (1+ i)))
+            (push (substring text start i) tokens))))))
+    (nreverse tokens)))
+
 (defun rfcview:read--wrap-translation-text (text indent max-width)
   "Wrap TEXT to MAX-WIDTH columns, using INDENT spaces as continuation prefix.
-Uses `string-width' so CJK characters take their actual display width."
-  (let* ((words (split-string text "[ \t]+" t))
+Uses `string-width' so CJK characters take their actual display width.
+Each CJK character is its own breakable unit so wrapping works for
+Japanese and Chinese, which lack inter-word spaces; no space is
+inserted between adjacent CJK tokens in the output."
+  (let* ((tokens (rfcview:read--tokenize-for-wrap text))
          (sep (concat "\n" (make-string indent ?\s)))
-         lines line (col indent))
-    (dolist (w words)
-      (let ((ww (string-width w)))
+         lines line (col indent) prev-cjk)
+    (dolist (tok tokens)
+      (let* ((tw (string-width tok))
+             (this-cjk (and (> (length tok) 0)
+                            (rfcview:read--cjk-no-space-char-p (aref tok 0))))
+             (need-space (and line (not (and prev-cjk this-cjk))))
+             (added (+ (if need-space 1 0) tw)))
         (cond
          ((null line)
-          (setq line (list w)
-                col (+ indent ww)))
-         ((<= (+ col 1 ww) max-width)
-          (push w line)
-          (setq col (+ col 1 ww)))
+          (setq line (list tok)
+                col (+ indent tw)))
+         ((<= (+ col added) max-width)
+          (when need-space (push " " line))
+          (push tok line)
+          (setq col (+ col added)))
          (t
-          (push (mapconcat #'identity (nreverse line) " ") lines)
-          (setq line (list w)
-                col (+ indent ww))))))
+          (push (mapconcat #'identity (nreverse line) "") lines)
+          (setq line (list tok)
+                col (+ indent tw))))
+        (setq prev-cjk this-cjk)))
     (when line
-      (push (mapconcat #'identity (nreverse line) " ") lines))
+      (push (mapconcat #'identity (nreverse line) "") lines))
     (mapconcat #'identity (nreverse lines) sep)))
 
 (defconst rfcview:read--translation-wrap-slack 4

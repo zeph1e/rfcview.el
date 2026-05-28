@@ -3228,6 +3228,40 @@ SINGLE state is preserved across the hide."
     (dolist (line (split-string out "\n"))
       (should (<= (string-width line) 12)))))
 
+(ert-deftest rfcview:test-wrap-translation-text-wraps-cjk-without-spaces ()
+  "Japanese/Chinese text (no inter-word spaces) still wraps to MAX-WIDTH.
+Each CJK character is its own breakable unit; no space is inserted
+between adjacent CJK characters."
+  (let* ((jp "日本語のテキストはスペースなしで折り返される必要があります")
+         (out-jp (rfcview:read--wrap-translation-text jp 0 10))
+         (lines-jp (split-string out-jp "\n")))
+    (should (> (length lines-jp) 1))
+    (dolist (line lines-jp)
+      (should (<= (string-width line) 10)))
+    (should-not (string-match-p " " out-jp)))
+  (let* ((zh "中文文本没有空格也需要正确换行处理这是测试")
+         (out-zh (rfcview:read--wrap-translation-text zh 0 8))
+         (lines-zh (split-string out-zh "\n")))
+    (should (> (length lines-zh) 1))
+    (dolist (line lines-zh)
+      (should (<= (string-width line) 8)))
+    (should-not (string-match-p " " out-zh))))
+
+(ert-deftest rfcview:test-wrap-translation-text-mixed-cjk-latin ()
+  "Mixed CJK+Latin text wraps with spaces between Latin words and CJK
+runs; no spaces are introduced between adjacent CJK characters."
+  (let* ((text "Hello 世界 this is a テスト of mixed text")
+         (out (rfcview:read--wrap-translation-text text 0 20)))
+    (dolist (line (split-string out "\n"))
+      (should (<= (string-width line) 20)))
+    (should (string-match-p "Hello" out))
+    ;; CJK runs survive intact when they fit on one line.
+    (should (string-match-p "世界" out))
+    (should (string-match-p "テスト" out))
+    ;; No space inserted between adjacent CJK characters.
+    (should-not (string-match-p "世 界" out))
+    (should-not (string-match-p "テ ス" out))))
+
 (ert-deftest rfcview:test-translate-document-cancel-during-job-aborts-and-hides ()
   "Pressing T while a job is in flight clears the job and hides overlays."
   (with-temp-buffer
