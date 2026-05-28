@@ -135,9 +135,8 @@ Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]]. rfcvie
 
 * Translation
 
-
 #+CAPTION: Translation
-file:res/rfcview-tr.png
+[[file:res/rfcview-tr.png]]
 
 rfcview can translate RFC paragraphs in place via the unofficial Google Translate gtx endpoint — no API key required. The original buffer text is never modified; translations appear as overlays whose =display= property visually replaces the original. =buffer-substring= still returns the English, and =copy/paste= yields English.
 
