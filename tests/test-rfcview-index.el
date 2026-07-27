@@ -71,6 +71,31 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
   (concat "2026 The IMAP Mailbox Attribute List. B. Leiba, Ed. March 1996. "
           "(Format: TXT=10000 bytes) (Status: PROPOSED STANDARD)\n\n"))
 
+(defconst rfcview-test:entry-rfc10000
+  (concat "10000 Five-Digit Protocol. A. Author. January 2026. "
+          "(Format: TXT=1234 bytes) (Status: PROPOSED STANDARD)\n\n"))
+
+(defconst rfcview-test:entry-rfc10005-with-obsoletes
+  (concat "10005 Another Five-Digit Protocol. A. Author. January 2026. "
+          "(Format: TXT=1234 bytes) (Obsoletes RFC10000) "
+          "(Status: PROPOSED STANDARD)\n\n"))
+
+;; The real rfc-index does not zero-pad RFC numbers at all -- entries for
+;; RFC 1-999 appear as plain 1-3 digit numbers ("1 ...", "999 ..."), never
+;; "0001 ...".  These fixtures use that real (unpadded) shape, unlike
+;; entry-rfc1/entry-rfc10/entry-rfc793 above, which are zero-padded and so
+;; would pass even against a regex that wrongly requires >= 4 digits.
+(defconst rfcview-test:entry-rfc1-unpadded
+  "1 Host Software. S. Crocker. April 1969. (Format: TXT=19529 bytes) (Status: UNKNOWN)\n\n")
+
+(defconst rfcview-test:entry-rfc999-unpadded
+  (concat "999 Requests For Comments Summary. A. Westine. December 1986. "
+          "(Format: TXT=12345 bytes) (Status: UNKNOWN)\n\n"))
+
+(defconst rfcview-test:entry-rfc1000-unpadded
+  (concat "1000 Request For Comments Reference Guide. J.K. Reynolds. "
+          "August 1987. (Format: TXT=54321 bytes) (Status: UNKNOWN)\n\n"))
+
 (ert-deftest rfcview:test-parse-index-entry-number ()
   "Parses RFC number from index entry."
   (with-temp-buffer
@@ -188,6 +213,45 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
     (let ((entry2 (rfcview:parse-index-entry (current-buffer))))
       (should (= 793 (plist-get entry2 :number))))))
 
+(ert-deftest rfcview:test-parse-index-entry-five-digit-number ()
+  "Parses a 5-digit RFC number (RFC >= 10000) without truncation."
+  (with-temp-buffer
+    (insert rfcview-test:entry-rfc10000)
+    (goto-char (point-min))
+    (let ((entry (rfcview:parse-index-entry (current-buffer))))
+      (should (= 10000 (plist-get entry :number))))))
+
+(ert-deftest rfcview:test-parse-index-entry-sequential-four-then-five-digit ()
+  "A 4-digit entry followed by a 5-digit entry both parse in sequence.
+Regression guard for the entry-boundary regexp requiring exactly 4 digits,
+which used to make the parser skip past 5-digit entries entirely."
+  (with-temp-buffer
+    (insert rfcview-test:entry-rfc793)
+    (insert rfcview-test:entry-rfc10000)
+    (goto-char (point-min))
+    (rfcview:parse-index-entry (current-buffer))
+    (let ((entry2 (rfcview:parse-index-entry (current-buffer))))
+      (should (= 10000 (plist-get entry2 :number))))))
+
+(ert-deftest rfcview:test-parse-index-entry-obsoletes-five-digit-reference ()
+  "The Obsoletes trait preserves a 5-digit RFC reference intact."
+  (with-temp-buffer
+    (insert rfcview-test:entry-rfc10005-with-obsoletes)
+    (goto-char (point-min))
+    (let ((entry (rfcview:parse-index-entry (current-buffer))))
+      (should (member "RFC10000" (plist-get entry :obsoletes))))))
+
+(ert-deftest rfcview:test-parse-index-entry-unpadded-single-digit-number ()
+  "Parses a 1-digit RFC number in the real (unpadded) index shape.
+Regression guard: the real rfc-index never zero-pads RFC numbers, so a
+regex requiring a minimum digit count (e.g. >= 4) fails on RFC 1-999 and
+silently skips them all."
+  (with-temp-buffer
+    (insert rfcview-test:entry-rfc1-unpadded)
+    (goto-char (point-min))
+    (let ((entry (rfcview:parse-index-entry (current-buffer))))
+      (should (= 1 (plist-get entry :number))))))
+
 ;;; ─── rfcview:parse-index-buffer ─────────────────────────────────────────────
 
 (defconst rfcview-test:small-index-text
@@ -195,6 +259,19 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
           "\n\n"
           rfcview-test:entry-rfc1
           rfcview-test:entry-rfc793))
+
+(defconst rfcview-test:small-index-text-with-five-digit
+  (concat "HTTP/1.1 200 OK\r\nLast-Modified: Tue, 01 Jan 2019 12:00:00 GMT\r\n\r\n"
+          "\n\n"
+          rfcview-test:entry-rfc793
+          rfcview-test:entry-rfc10000))
+
+(defconst rfcview-test:small-index-text-unpadded-low-numbers
+  (concat "HTTP/1.1 200 OK\r\nLast-Modified: Tue, 01 Jan 2019 12:00:00 GMT\r\n\r\n"
+          "\n\n"
+          rfcview-test:entry-rfc1-unpadded
+          rfcview-test:entry-rfc999-unpadded
+          rfcview-test:entry-rfc1000-unpadded))
 
 (ert-deftest rfcview:test-parse-index-buffer-returns-hash-table ()
   "Returns a plist with a :table that is a hash-table."
@@ -225,6 +302,70 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
       (should (= 793 (plist-get rfc793 :number)))
       (should (string-match-p "Transmission Control Protocol"
                                (plist-get rfc793 :title))))))
+
+(ert-deftest rfcview:test-parse-index-buffer-populates-five-digit-entry ()
+  "A 5-digit entry following a 4-digit one is not skipped by the parser."
+  (with-temp-buffer
+    (insert rfcview-test:small-index-text-with-five-digit)
+    (goto-char (point-min))
+    (let* ((result (rfcview:parse-index-buffer (current-buffer)))
+           (tbl    (plist-get result :table)))
+      (should (gethash 793 tbl))
+      (should (gethash 10000 tbl)))))
+
+(ert-deftest rfcview:test-parse-index-buffer-populates-unpadded-low-numbers ()
+  "1-digit, 3-digit, and 4-digit unpadded entries in sequence all parse.
+Direct reproduction of the reported symptom: an entry-boundary regex that
+requires a minimum digit count silently starts the cache at the first
+entry wide enough to satisfy it (RFC 1000), dropping every entry below it
+even though it comes first in the file."
+  (with-temp-buffer
+    (insert rfcview-test:small-index-text-unpadded-low-numbers)
+    (goto-char (point-min))
+    (let* ((result (rfcview:parse-index-buffer (current-buffer)))
+           (tbl    (plist-get result :table)))
+      (should (gethash 1 tbl))
+      (should (gethash 999 tbl))
+      (should (gethash 1000 tbl)))))
+
+;;; ─── rfcview:index-updated-p ─────────────────────────────────────────────────
+
+(defun rfcview-test:make-head-response-buffer (last-modified-header)
+  "Return a temp buffer shaped like a HEAD response with LAST-MODIFIED-HEADER."
+  (let ((buf (generate-new-buffer " *rfcview-test-head*")))
+    (with-current-buffer buf
+      (insert (format "HTTP/1.1 200 OK\r\nLast-Modified: %s\r\n\r\n"
+                      last-modified-header)))
+    buf))
+
+(ert-deftest rfcview:test-index-updated-p-true-when-newer ()
+  "Returns non-nil when the live index's Last-Modified is newer than cache.
+Regression guard: this comparison used to be silently broken because the
+fetched header was parsed with parse-time-string (a decoded time list)
+while the cached value uses date-to-time (an encoded time) -- time-less-p
+can't meaningfully compare the two, so the check almost always returned nil
+regardless of the real dates."
+  (let ((rfcview:rfc-cache
+         (list :last-modified (date-to-time "Tue, 01 Jan 2019 12:00:00 GMT")))
+        (buf (rfcview-test:make-head-response-buffer
+              "Wed, 01 Jul 2026 12:00:00 GMT")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'rfcview:retrieve-index)
+                   (lambda (&optional _method) buf)))
+          (should (rfcview:index-updated-p)))
+      (kill-buffer buf))))
+
+(ert-deftest rfcview:test-index-updated-p-false-when-not-newer ()
+  "Returns nil when the live index's Last-Modified is not newer than cache."
+  (let ((rfcview:rfc-cache
+         (list :last-modified (date-to-time "Wed, 01 Jul 2026 12:00:00 GMT")))
+        (buf (rfcview-test:make-head-response-buffer
+              "Tue, 01 Jan 2019 12:00:00 GMT")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'rfcview:retrieve-index)
+                   (lambda (&optional _method) buf)))
+          (should-not (rfcview:index-updated-p)))
+      (kill-buffer buf))))
 
 ;;; ─── rfcview:get-filter-name ─────────────────────────────────────────────────
 
@@ -588,6 +729,21 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
       (should-not (string-match-p "Obsoletes" line))
       (should-not (string-match-p "Updated by" line)))))
 
+(ert-deftest rfcview:test-make-entry-line-five-digit-number-unpadded-right-aligned ()
+  "A 5-digit RFC number renders right-aligned without zero-padding.
+left-margin-width 6 matches what rfcview:refresh-index would compute for a
+cache whose max entry is 5 digits: (1+ (length \"10000\"))."
+  (let ((rfcview:use-face nil)
+        (rfcview:use-debug nil)
+        (rfcview:index-filter nil)
+        (left-margin-width 6))
+    (let* ((line (rfcview:make-entry-line 10000 "Five-Digit Protocol" "2026"
+                                          '("A. Author")
+                                          nil nil nil nil nil))
+           (disp (get-text-property 0 'display line))
+           (str  (and (consp disp) (cadr disp))))
+      (should (string= " 10000" str)))))
+
 ;;; ─── rfcview:insert-with-text-properties ─────────────────────────────────────
 
 (ert-deftest rfcview:test-insert-with-text-properties-sets-number-property ()
@@ -612,6 +768,23 @@ RFC-ALIST is a list of (NUMBER . DATA-PLIST) pairs."
       (let ((btn (button-at (match-beginning 0))))
         (should btn)
         (should (= 3 (button-get btn 'number)))))))
+
+(ert-deftest rfcview:test-insert-with-text-properties-creates-button-for-five-digit-ref ()
+  "A 5-digit reference like RFC10000 becomes a button spanning the whole number.
+Regression guard for a regexp that used to hardcode exactly 4 digits, which
+buttonized only \"RFC1000\" and left the trailing \"0\" as dangling text."
+  (let ((rfcview:rfc-cache (rfcview-test:make-cache))
+        (rfcview:use-face nil))
+    (with-temp-buffer
+      (rfcview:insert-with-text-properties
+       "See RFC10000 for details.\n"
+       1)
+      (goto-char (point-min))
+      (search-forward "RFC10000")
+      (let ((btn (button-at (match-beginning 0))))
+        (should btn)
+        (should (= 10000 (button-get btn 'number)))
+        (should (= (match-end 0) (button-end btn)))))))
 
 ;;; ─── rfcview:index-toggle-favorite ──────────────────────────────────────────
 

@@ -883,6 +883,10 @@ or if the anchor tables are empty."
         (overlay-put ov 'invisible t)
         (overlay-put ov 'evaporate t)))))
 
+(defun rfcview:read-buffer-name (number)
+  "Return the reader buffer name for RFC NUMBER, e.g. \"*RFC 42*\"."
+  (format "*RFC %d*" number))
+
 (defun rfcview:nav-push ()
   "Push the current reader location onto the BACK stack and clear FORWARD.
 Called by button actions just before they leave the current location."
@@ -904,7 +908,7 @@ Four cases by target buffer status:
 - Buffer was killed: re-open via `rfcview:read-rfc' (uses local cache)."
   (let* ((num (car rec))
          (pos (cdr rec))
-         (buf-name (format "*RFC %04d*" num))
+         (buf-name (rfcview:read-buffer-name num))
          (buf (get-buffer buf-name))
          (win (and buf (get-buffer-window buf))))
     (cond
@@ -1715,7 +1719,7 @@ run on regions with no overlays yet and be a silent no-op."
 
 (defun rfcview:open-rfc-txt (number file)
   "Open locally cached txt FILE as RFC NUMBER and return the buffer."
-  (let ((buffer (get-buffer-create (format "*RFC %04d*" number))))
+  (let ((buffer (get-buffer-create (rfcview:read-buffer-name number))))
     (with-current-buffer buffer
       (insert-file-contents file)
       (set-buffer-modified-p nil)
@@ -1727,9 +1731,9 @@ run on regions with no overlays yet and be a silent no-op."
 Signals an error if pdf-tools is not installed."
   (unless (fboundp 'pdf-view-mode)
     (error
-     "pdf-tools is not installed; install it to view RFC %04d (PDF only)"
+     "pdf-tools is not installed; install it to view RFC %d (PDF only)"
      number))
-  (let* ((buf-name (format "*RFC %04d*" number))
+  (let* ((buf-name (rfcview:read-buffer-name number))
          (buffer (or (get-buffer buf-name)
                      (let ((b (find-file-noselect file)))
                        (with-current-buffer b
@@ -1749,7 +1753,7 @@ not cached locally."
 (defun rfcview:download-rfc (number fmt to-file)
   "Download RFC NUMBER as FMT format to TO-FILE.
 Return TO-FILE on success, nil on 404."
-  (message "Downloading RFC%04d (%s)..." number fmt)
+  (message "Downloading RFC%d (%s)..." number fmt)
   (let ((buf (rfcview:retrieve-rfc number fmt)))
     (if (eql 200 (rfcview:http-response-status buf))
         (progn
@@ -1768,6 +1772,26 @@ Return TO-FILE on success, nil on 404."
           to-file)
       (kill-buffer buf)
       nil)))
+
+(defun rfcview:read--local-file-path (number fmt)
+  "Return the local cache path for RFC NUMBER in FMT, downloading if needed.
+Checks the current (unpadded) filename first.  If that's missing but a
+file exists under the legacy zero-padded name (e.g. \"rfc0042.txt\" from
+before rfcview dropped the padding), that file is used for this open and
+copied forward to the current filename — the legacy file itself is left
+in place, not moved, so the original download is never at risk.  Falls
+through to `rfcview:download-rfc' when neither is present.  Returns nil
+on download failure (404)."
+  (let* ((f (format "%srfc%d.%s"
+                    rfcview:local-directory number (symbol-name fmt)))
+         (legacy-f (format "%srfc%04d.%s"
+                           rfcview:local-directory number (symbol-name fmt))))
+    (cond
+     ((file-exists-p f) f)
+     ((and (not (string= f legacy-f)) (file-exists-p legacy-f))
+      (copy-file legacy-f f)
+      f)
+     (t (rfcview:download-rfc number fmt f)))))
 
 (defun rfcview:read--format-order (preferred available)
   "Return the order of formats to try when opening an RFC.
@@ -1800,18 +1824,14 @@ hand-off."
          (formats (rfcview:read--format-order rfcview:preferred-format
                                               (plist-get entry :format)))
          (buffer
-          (or (get-buffer (format "*RFC %04d*" number))
+          (or (get-buffer (rfcview:read-buffer-name number))
               (catch 'found
                 (dolist (fmt formats)
                   (let ((fn (cdr (assq fmt rfcview:open-rfc-functions))))
                     (unless fn
                       (rfcview:open-rfc-fallback number fmt)
                       (throw 'found 'browser))
-                    (let* ((f (format "%srfc%04d.%s"
-                                      rfcview:local-directory number
-                                      (symbol-name fmt)))
-                           (file (if (file-exists-p f) f
-                                   (rfcview:download-rfc number fmt f))))
+                    (let ((file (rfcview:read--local-file-path number fmt)))
                       (when file
                         (throw 'found (funcall fn number file))))))))))
     (cond ((bufferp buffer) (with-current-buffer buffer
@@ -1819,7 +1839,7 @@ hand-off."
                                 (pop-to-buffer buffer)
                                 (rfcview:read-jump-to-section section t))))
           ((eq buffer 'browser) nil)
-          (t (error "RFC%04d is not available" number)))))
+          (t (error "RFC%d is not available" number)))))
 
 (provide 'rfcview-reader)
 ;;; rfcview-reader.el ends here

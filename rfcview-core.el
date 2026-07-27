@@ -256,18 +256,31 @@ RFC is opened from the index buffer.")
                       '("January" "February" "March" "April" "May" "June" "July"
                         "August" "September" "October" "November" "December"))))
 
-(defconst rfcview:rfc-cache-version 2
+(defconst rfcview:rfc-cache-version 3
   "Schema version of `rfcview:rfc-cache'.
 Bump when the on-disk layout changes incompatibly (new required
-keys, value-shape changes, etc.).  At load time, a cache whose
-`:version' does not match this constant is discarded and rebuilt
-from scratch by the next index refresh.")
+keys, value-shape changes, etc.) OR when previously-cached `:table'
+data can be wrong due to a parser bug fix — either way, the effect is
+the same: the next load discards and rebuilds from scratch.  At load
+time, a cache whose `:version' does not match this constant is handed
+to `rfcview:update-cache'.
+
+Bumped 2 -> 3 because `rfcview:parse-index-entry''s entry-boundary
+regexp silently dropped ranges of RFCs from `:table' on any cache
+built before the fix: first RFC >= 10000 (regexp required exactly 4
+digits), then, in the fix for that, RFC 1-999 (regexp then required
+>= 4 digits, but the real rfc-index never zero-pads).  Also fixed at
+the same time: `rfcview:index-updated-p' compared an encoded
+(`date-to-time') and a decoded (`parse-time-string') time value, so a
+stale cache would almost never be detected as stale via
+`Last-Modified' alone — this version bump is what actually forces
+already-broken on-disk caches to rebuild.")
 
 (defconst rfcview:rfc-cache-default
   `(:version ,rfcview:rfc-cache-version :last-modified (-33750 55928)))
 
 ;; Cache structure
-;; (:version 2
+;; (:version 3
 ;;  :last-modified lm-date
 ;;  :table #s(hash-table
 ;;              size XXXX

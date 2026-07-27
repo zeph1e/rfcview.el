@@ -663,6 +663,32 @@ one blank line is left visible (overlay ends before it)."
       (let ((btn (button-at (match-beginning 0))))
         (should (= 2616 (button-get btn 'number)))))))
 
+(ert-deftest rfcview:test-read-buttonize-refs-five-digit-inline-notation ()
+  "Creates a button for a 5-digit 'RFC 10000' inline reference (RFC >= 10000).
+Regression guard: every other fixture in this section tops out at 4 digits,
+so nothing here previously exercised the unbounded [0-9]+ in the regexp."
+  (let ((rfcview:rfc-cache nil))
+    (with-temp-buffer
+      (insert "As defined in RFC 10000, the protocol provides...\n")
+      (rfcview:read-buttonize-refs)
+      (goto-char (point-min))
+      (search-forward "RFC 10000")
+      (let ((btn (button-at (match-beginning 0))))
+        (should btn)
+        (should (= 10000 (button-get btn 'number)))))))
+
+(ert-deftest rfcview:test-read-buttonize-refs-five-digit-bracketed-notation ()
+  "Creates a button for a 5-digit [RFC10000] bracket notation."
+  (let ((rfcview:rfc-cache nil))
+    (with-temp-buffer
+      (insert "See [RFC10000] for details.\n")
+      (rfcview:read-buttonize-refs)
+      (goto-char (point-min))
+      (search-forward "RFC10000")
+      (let ((btn (button-at (match-beginning 0))))
+        (should btn)
+        (should (= 10000 (button-get btn 'number)))))))
+
 (ert-deftest rfcview:test-read-buttonize-refs-uses-cache-for-help-echo ()
   "Button help-echo is set to the RFC title from rfcview:rfc-cache."
   (let* ((tbl (make-hash-table :test 'equal))
@@ -1595,7 +1621,7 @@ matches via the `[A-Z(\"]' title-start class."
           (with-temp-file tmp (insert "RFC content here.\n"))
           (let ((buf (rfcview:open-rfc-txt 793 tmp)))
             (unwind-protect
-                (should (string= "*RFC 0793*" (buffer-name buf)))
+                (should (string= "*RFC 793*" (buffer-name buf)))
               (kill-buffer buf))))
       (delete-file tmp))))
 
@@ -1759,7 +1785,7 @@ that regex fails to match a line that contains only \\r (from CRLF)."
 
 (ert-deftest rfcview:test-read-rfc-reuses-existing-buffer ()
   "rfcview:read-rfc pops to an existing *RFC XXXX* buffer without downloading."
-  (let ((existing (get-buffer-create "*RFC 0001*")))
+  (let ((existing (get-buffer-create "*RFC 1*")))
     (unwind-protect
         (cl-letf (((symbol-function 'rfcview:download-rfc)
                    (lambda (&rest _) (error "Should not download")))
@@ -1850,13 +1876,83 @@ that regex fails to match a line that contains only \\r (from CRLF)."
       (should browsed)
       (should (string-match-p "rfc9999\\.html" browsed)))))
 
+;;; ─── rfcview:read-buffer-name ───────────────────────────────────────────────
+
+(ert-deftest rfcview:test-read-buffer-name-unpadded ()
+  "rfcview:read-buffer-name does not zero-pad the RFC number."
+  (should (string= "*RFC 42*" (rfcview:read-buffer-name 42)))
+  (should (string= "*RFC 10000*" (rfcview:read-buffer-name 10000))))
+
+;;; ─── rfcview:read--local-file-path ──────────────────────────────────────────
+
+(ert-deftest rfcview:test-local-file-path-uses-existing-unpadded-file ()
+  "Returns the unpadded path directly when it already exists; no legacy check."
+  (let* ((dir (file-name-as-directory (make-temp-file "rfcview-test-" t)))
+         (rfcview:local-directory dir))
+    (unwind-protect
+        (progn
+          (with-temp-file (concat dir "rfc42.txt") (insert "new content"))
+          (cl-letf (((symbol-function 'rfcview:download-rfc)
+                     (lambda (&rest _) (error "Should not download"))))
+            (should (string= (concat dir "rfc42.txt")
+                             (rfcview:read--local-file-path 42 'txt)))))
+      (delete-directory dir t))))
+
+(ert-deftest rfcview:test-local-file-path-recovers-legacy-zero-padded-file ()
+  "A legacy zero-padded cache file is copied forward to the unpadded name.
+The legacy file is left in place (copy, not rename) and no download happens."
+  (let* ((dir (file-name-as-directory (make-temp-file "rfcview-test-" t)))
+         (rfcview:local-directory dir)
+         (legacy (concat dir "rfc0042.txt"))
+         (new    (concat dir "rfc42.txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file legacy (insert "legacy content"))
+          (cl-letf (((symbol-function 'rfcview:download-rfc)
+                     (lambda (&rest _) (error "Should not download"))))
+            (should (string= new (rfcview:read--local-file-path 42 'txt))))
+          (should (file-exists-p new))
+          (should (file-exists-p legacy))
+          (with-temp-buffer
+            (insert-file-contents new)
+            (should (string= "legacy content" (buffer-string)))))
+      (delete-directory dir t))))
+
+(ert-deftest rfcview:test-local-file-path-downloads-when-neither-exists ()
+  "Falls through to rfcview:download-rfc when neither file is present."
+  (let* ((dir (file-name-as-directory (make-temp-file "rfcview-test-" t)))
+         (rfcview:local-directory dir)
+         downloaded)
+    (unwind-protect
+        (cl-letf (((symbol-function 'rfcview:download-rfc)
+                   (lambda (_number _fmt file) (setq downloaded t) file)))
+          (rfcview:read--local-file-path 42 'txt)
+          (should downloaded))
+      (delete-directory dir t))))
+
+(ert-deftest rfcview:test-local-file-path-no-self-copy-above-999 ()
+  "For RFC >= 1000 the legacy and current paths coincide; no copy-file call."
+  (let* ((dir (file-name-as-directory (make-temp-file "rfcview-test-" t)))
+         (rfcview:local-directory dir)
+         copied)
+    (unwind-protect
+        (progn
+          (with-temp-file (concat dir "rfc1234.txt") (insert "content"))
+          (cl-letf (((symbol-function 'copy-file)
+                     (lambda (&rest _) (setq copied t)))
+                    ((symbol-function 'rfcview:download-rfc)
+                     (lambda (&rest _) (error "Should not download"))))
+            (rfcview:read--local-file-path 1234 'txt)
+            (should-not copied)))
+      (delete-directory dir t))))
+
 ;;; ─── rfcview:nav-history ────────────────────────────────────────────────────
 
 (defmacro rfcview:test--with-fake-reader (rfc-num pos &rest body)
   "Run BODY in a fake reader buffer pretending to be RFC RFC-NUM with point at POS.
 Resets the global navigation history before BODY and cleans up the buffer after."
   (declare (indent 2))
-  `(let ((buf (generate-new-buffer (format "*RFC %04d*" ,rfc-num))))
+  `(let ((buf (generate-new-buffer (rfcview:read-buffer-name ,rfc-num))))
      (rfcview:nav-history-clear)
      (unwind-protect
          (with-current-buffer buf
@@ -1953,8 +2049,8 @@ Resets the global navigation history before BODY and cleans up the buffer after.
 
 (ert-deftest rfcview:test-history-back-switches-to-other-rfc-buffer ()
   "C-c C-b across RFCs switches to the source buffer and restores position."
-  (let ((buf-a (generate-new-buffer "*RFC 0100*"))
-        (buf-b (generate-new-buffer "*RFC 0200*")))
+  (let ((buf-a (generate-new-buffer "*RFC 100*"))
+        (buf-b (generate-new-buffer "*RFC 200*")))
     (rfcview:nav-history-clear)
     (unwind-protect
         (progn
@@ -1978,8 +2074,8 @@ Resets the global navigation history before BODY and cleans up the buffer after.
 
 (ert-deftest rfcview:test-jump-to-another-rfc-after-back-clears-forward ()
   "After back, jumping (push) to a new location discards the forward branch."
-  (let ((buf-a (generate-new-buffer "*RFC 0100*"))
-        (buf-b (generate-new-buffer "*RFC 0200*")))
+  (let ((buf-a (generate-new-buffer "*RFC 100*"))
+        (buf-b (generate-new-buffer "*RFC 200*")))
     (rfcview:nav-history-clear)
     (unwind-protect
         (progn
@@ -2233,7 +2329,7 @@ that broke in real read-mode buffers."
 
 (ert-deftest rfcview:test-read-quit-integration-selects-real-index-window ()
   "End-to-end: rfcview:read-quit selects the live `*RFC INDEX*' window."
-  (let ((reader (get-buffer-create "*RFC 0001*"))
+  (let ((reader (get-buffer-create "*RFC 1*"))
         (index  (get-buffer-create "*RFC INDEX*")))
     (unwind-protect
         (save-window-excursion

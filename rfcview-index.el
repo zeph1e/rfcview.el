@@ -50,14 +50,14 @@ create the cache from scratch."
 (defun rfcview:parse-index-entry (buffer)
   "Parse an entry from rfc-index file."
   (with-current-buffer buffer
-    (when (search-forward-regexp "^[0-9]\\{4\\} " nil t)
+    (when (search-forward-regexp "^[0-9]+ " nil t)
       (let ((traits '((format       . "Format:\\s-+")
                       (obsoletes    . "Obsoletes\\s-+")
                       (obsoleted-by . "Obsoleted\\s-+by\\s-+")
                       (updates      . "Updates\\s-+")
                       (updated-by   . "Updated\\s-+by\\s-+")
                       (status       . "Status:\\s-+")))
-            (beg (- (point) 6))
+            (beg (match-beginning 0))
             end number title authors date trait-begin trait-results)
         (condition-case e
             (progn
@@ -182,7 +182,7 @@ create the cache from scratch."
              (goto-char (point-min))
              (unless (eq (point-min) (point-max))
                (if (search-forward-regexp "^Last-Modified: " nil t)
-                   (parse-time-string
+                   (date-to-time
                     (buffer-substring (1+ (point))
                                       (line-end-position))))))))
       (time-less-p (plist-get rfcview:rfc-cache :last-modified)
@@ -315,10 +315,10 @@ create the cache from scratch."
     (add-text-properties beg end plist)
     (save-excursion
       (goto-char beg)
-      (while (search-forward-regexp "RFC[0-9]\\{4\\}" end 'noerror)
-        (let* ((bbtn (- (point) 7))
-               (ebtn (point))
-               (num (string-to-number (buffer-substring (+ bbtn 3) ebtn)))
+      (while (search-forward-regexp "RFC\\([0-9]+\\)" end 'noerror)
+        (let* ((bbtn (match-beginning 0))
+               (ebtn (match-end 0))
+               (num (string-to-number (match-string 1)))
                (rfc (gethash num (plist-get rfcview:rfc-cache :table))))
           (make-button bbtn ebtn
                             'number num
@@ -769,9 +769,9 @@ Returns a list of (POS NEXT ORIGINAL-WP) tuples for later restoration."
     (if (member number favorite)
         (progn
           (setq favorite (remove number favorite))
-          (message "RFC%04d was removed from favorite list." number))
+          (message "RFC%d was removed from favorite list." number))
       (push number favorite)
-      (message "RFC%04d was added to favorite list." number))
+      (message "RFC%d was added to favorite list." number))
     (plist-put rfcview:rfc-cache :favorite (sort favorite '<))
     (rfcview:index-refresh-entry number)))
 
