@@ -8,8 +8,9 @@
 - [x] handle url
 - [x] handle Section XX of RFC XXX.
 - [x] handle sections xxx and xxx of RFC XXX
-- [ ] Read Format, Status traits from rfc-index and show in the index buffer (format as icon?)
+- [x] Read Format, Status traits from rfc-index
+- [ ] Show Format/Status in the index buffer (format as icon?)
 - [ ] Make RFC doc header be fancy not just dimming.
-- [ ] Apply more intelligent scoring for keyword search.
+- [x] Apply more intelligent scoring for keyword search.
 - [ ] Fix mouse overlay on index; only can select on text, left/right margin do not show mouse overlay
 - [x] Fix `rfcview:entry-highlight-face` doesn't cover all area when line breaking happens

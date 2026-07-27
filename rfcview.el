@@ -5,7 +5,7 @@
 ;; Author: Yunsik Jang <doomsday@kldp.org>
 ;; Homepage: http://github.com/zeph1e/rfcview.el
 ;; Created: 5 Oct 2016
-;; Version: 1.1
+;; Version: 2.0
 ;; Keywords: docs
 ;; License: WTFPL (http://sam.zoy.org/wtfpl)
 ;;
@@ -15,6 +15,41 @@
 ;;; Commentary:
 
 ;;; Change Log:
+;;
+;;  2.0 - 28 Jul 2026 - Google Translate overlays, RFC-number & cache fixes
+;;
+;;   - inline Google Translate overlays in the reader: `t' translates
+;;     the paragraph or active region at point, `T' translates the
+;;     whole document (async, visible area first), `l' picks the
+;;     target language; results are shown as `display' overlays so
+;;     the original English text is never modified; CJK (Japanese /
+;;     Chinese) wraps correctly without inter-word spaces.
+;;   - RFC-number and cache correctness overhaul: the real rfc-index
+;;     never zero-pads RFC numbers and has crossed into 5 digits;
+;;     fixed entry parsing that silently dropped RFC >= 10000 and
+;;     RFC 1-999, cross-reference buttons that truncated 5+ digit
+;;     numbers, and a cache-freshness check that never detected a
+;;     newer index; on-disk cache schema bumped so any cache broken
+;;     by these bugs rebuilds automatically.
+;;   - Table of Contents buttonization now covers RFC-1001/1005-era
+;;     formatting: blank-line-separated entries, bare `APPENDIX A'
+;;     headings, dash-form subsections, dot leaders with no
+;;     separating space.
+;;   - format/status-driven dispatch: `(Format: ...)' / `(Status: ...)'
+;;     read from the rfc-index per entry; format selection is now
+;;     index-authoritative instead of a hard-coded txt/pdf pair;
+;;     `html' / `xml' open via the browser.
+;;   - reader: `j' jumps to a section by number or title; "Sections
+;;     X, Y, and Z of RFC NNNN" buttonizes every listed section.
+;;   - index UI: entry highlight extends correctly into wrapped /
+;;     continuation margins; keyword search scoring rewritten to be
+;;     case-insensitive, additive, and multi-field (title, authors,
+;;     status, RFC number).
+;;   - misc. fixes: section-jump landing when the target buffer is
+;;     already open, buttonizing an `RFC NNNN' reference that line-
+;;     wraps mid-match, header fontification truncating early when
+;;     an author has no organization line, `html'/`xml' fallback
+;;     arity bug.
 ;;
 ;;  1.1 - 16 May 2026 - TOC buttons, link / history navigation, polished UI
 ;;
