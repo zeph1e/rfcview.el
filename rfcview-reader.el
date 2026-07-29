@@ -1609,12 +1609,12 @@ If the `*RFC INDEX*' window is visible, select it.  Otherwise, if
 the buffer still exists, switch to it in the current window.  If
 the index buffer has been killed, just bury the reader."
   (interactive)
-  (bury-buffer)
   (let* ((buffer (get-buffer "*RFC INDEX*"))
          (index-win (and buffer (get-buffer-window buffer))))
     (cond
-     (index-win (select-window index-win))
-     (buffer    (switch-to-buffer buffer)))))
+     (index-win (bury-buffer) (select-window index-win))
+     (buffer    (switch-to-buffer buffer))
+     (t (bury-buffer)))))
 
 (defun rfcview:read-show-help ()
   "Show a help buffer listing rfcview read mode keybindings."
