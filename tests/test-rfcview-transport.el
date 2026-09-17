@@ -212,9 +212,14 @@ OUTPUT); OUTPUT is inserted into the current buffer, matching real
    :type 'rfcview:transport-infra-error))
 
 (ert-deftest rfcview:test-transport-rsync-parse-listing-extracts-token ()
+  "The listing's local date/time is interpreted in the current
+timezone, same as `encode-time' with no explicit ZONE -- so the
+expected epoch is computed the same way here, rather than hardcoded,
+to keep the test timezone-independent."
   (let ((token (rfcview:transport--rsync-parse-listing
-                "-r--r--r--         21,088 1997/03/14 00:48:41 rfc1.txt")))
-    (should (string= "21088:858268121" token))))
+                "-r--r--r--         21,088 1997/03/14 00:48:41 rfc1.txt"))
+        (expected-epoch (time-convert (encode-time 41 48 0 14 3 1997) 'integer)))
+    (should (string= (format "21088:%d" expected-epoch) token))))
 
 (ert-deftest rfcview:test-transport-rsync-parse-listing-nil-when-unparsable ()
   (should (null (rfcview:transport--rsync-parse-listing "not a listing line"))))
@@ -228,10 +233,11 @@ returns the parsed token with no buffer."
                 (lambda (_program args)
                   (setq captured-args args)
                   (cons 0 "-r--r--r--  21,088 1997/03/14 00:48:41 rfc1.txt")))))
-      (let ((result (rfcview:transport--rsync-fetch "rfcs-text-only" "rfc1.txt" t)))
+      (let ((result (rfcview:transport--rsync-fetch "rfcs-text-only" "rfc1.txt" t))
+            (expected-epoch (time-convert (encode-time 41 48 0 14 3 1997) 'integer)))
         (should (plist-get result :found))
         (should (null (plist-get result :buffer)))
-        (should (string= "21088:858268121" (plist-get result :token)))
+        (should (string= (format "21088:%d" expected-epoch) (plist-get result :token)))
         ;; last arg is the source spec; no local destination path follows it.
         (should (string-match-p "rfcs-text-only/rfc1\\.txt\\'" (car (last captured-args))))))))
 
