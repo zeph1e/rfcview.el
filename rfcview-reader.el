@@ -175,10 +175,12 @@ not end with a period (RFC 9959 §2 \"Language, Notation, and
 Terms\"); sentence-shape list items like \"3.  Foo, bar.\" are still
 rejected.")
 
-(defconst rfcview:supported-formats '(txt pdf html xml)
+(defconst rfcview:supported-formats '(txt pdf html)
   "All formats rfcview can route to a viewer.
-`txt'/`pdf' are downloaded and opened in Emacs; `html'/`xml' are
-handed to `browse-url' and not cached locally.")
+`txt'/`pdf' are downloaded and opened in Emacs; `html' is handed to
+`browse-url' and not cached locally.  `xml' was dropped: the RFC
+Editor's per-document xml URL is no longer live, and there is no
+other browsable xml target worth deprecating html's fix for.")
 
 (defconst rfcview:open-rfc-functions '((txt . rfcview:open-rfc-txt)
                                        (pdf . rfcview:open-rfc-pdf))
@@ -190,8 +192,8 @@ return the opened buffer (or nil if unavailable).
 
 To wire a new locally-cached format, add an (FMT . FN) entry here and
 add FMT to `rfcview:supported-formats'.  Formats listed in
-`rfcview:supported-formats' but absent from this alist (e.g. `html',
-`xml') fall through to `rfcview:open-rfc-fallback', which opens the
+`rfcview:supported-formats' but absent from this alist (currently just
+`html') fall through to `rfcview:open-rfc-fallback', which opens the
 document in the user's browser via `browse-url' and does not cache
 it locally.")
 
@@ -1743,34 +1745,30 @@ Signals an error if pdf-tools is not installed."
                        b))))
     buffer))
 
-(defun rfcview:open-rfc-fallback (number fmt)
-  "Open RFC NUMBER as FMT in the user's browser vina `browse-url'.
-Used for formats not rendered in Emacs (html, xml).  The document is
-not cached locally."
-  (browse-url (format "%srfc%d.%s"
-                      rfcview:rfc-base-url number (symbol-name fmt))))
+(defun rfcview:open-rfc-fallback (number _fmt)
+  "Open RFC NUMBER in the user's browser via `browse-url'.
+Only `html' reaches here now (`txt'/`pdf' have dedicated handlers in
+`rfcview:open-rfc-functions'; `xml' is no longer a supported format).
+Uses the RFC Editor's canonical info page, which renders the full RFC
+text.  The document is not cached locally."
+  (browse-url (format "https://www.rfc-editor.org/info/rfc%d/" number)))
 
 (defun rfcview:download-rfc (number fmt to-file)
   "Download RFC NUMBER as FMT format to TO-FILE.
-Return TO-FILE on success, nil on 404."
+Return TO-FILE on success, nil when the transport reports the
+document as not found."
   (message "Downloading RFC%d (%s)..." number fmt)
-  (let ((buf (rfcview:retrieve-rfc number fmt)))
-    (if (eql 200 (rfcview:http-response-status buf))
-        (progn
-          (with-current-buffer buf
-            (goto-char (point-min))
-            (when (re-search-forward "^$" nil t)
-              (if (eq fmt 'pdf)
-                  (progn (forward-line 1)
-                         (let ((coding-system-for-write 'binary))
-                           (write-region (point) (point-max)
-                                         to-file nil 'silent)))
-                (delete-region (point-min) (point))
-                (write-region (point-min) (point-max)
-                              to-file nil 'silent)))
-            (kill-buffer buf))
+  (let ((result (rfcview:transport-fetch-rfc number fmt)))
+    (if (plist-get result :found)
+        (let ((buf (plist-get result :buffer)))
+          (unwind-protect
+              (with-current-buffer buf
+                (if (eq fmt 'pdf)
+                    (let ((coding-system-for-write 'binary))
+                      (write-region (point-min) (point-max) to-file nil 'silent))
+                  (write-region (point-min) (point-max) to-file nil 'silent)))
+            (when (buffer-live-p buf) (kill-buffer buf)))
           to-file)
-      (kill-buffer buf)
       nil)))
 
 (defun rfcview:read--local-file-path (number fmt)
@@ -1800,25 +1798,32 @@ PREFERRED is `rfcview:preferred-format'.  AVAILABLE is the entry's
 like \"TXT\"); unsupported tokens are dropped.
 
 The result is the supported formats that appear in AVAILABLE, with
-PREFERRED first when it is listed.  When PREFERRED is not listed it
-is dropped (the index says it is unavailable).  When nothing supported
-is listed, returns nil — the caller treats that as \"unavailable\"."
-  (seq-intersection (cons preferred
-                          (remove preferred rfcview:supported-formats))
+PREFERRED first when it is listed.  When PREFERRED is not listed in
+AVAILABLE it is dropped (the index says it is unavailable).  When
+PREFERRED is not itself a member of `rfcview:supported-formats' (a
+stale/deprecated value, e.g. a config still setting `xml' after this
+package dropped it) it is likewise not treated as preferred — every
+supported format is tried in canonical order instead.  When nothing
+supported is listed, returns nil — the caller treats that as
+\"unavailable\"."
+  (seq-intersection (if (memq preferred rfcview:supported-formats)
+                       (cons preferred (remove preferred rfcview:supported-formats))
+                     rfcview:supported-formats)
                     (mapcar (lambda (s) (intern (downcase s)))
                             available)))
 
 (defun rfcview:read-rfc (number &optional section)
   "Open RFC NUMBER in the preferred format and pop to its buffer.
-Format selection follows `rfcview:read--format-order' against the
-cached `:format' for NUMBER, so only formats the rfc-index advertises
-are tried.  Each candidate format is dispatched through
-`rfcview:open-rfc-functions': a non-nil handler downloads (if needed)
-and opens the file in Emacs; a nil entry (or a format missing from the
-alist, e.g. `html'/`xml') is handed to `rfcview:open-rfc-fallback',
-which opens the document in the user's browser and stops the search.
-Signals an error when no candidate format yields a buffer or browser
-hand-off."
+SECTION, when non-nil, is passed through to the format handler to
+jump to that section after opening.  Format selection follows
+`rfcview:read--format-order' against the cached `:format' for NUMBER,
+so only formats the rfc-index advertises are tried.  Each candidate
+format is dispatched through `rfcview:open-rfc-functions': a non-nil
+handler downloads (if needed) and opens the file in Emacs; a nil entry
+or a format missing from the alist (currently just `html') is handed
+to `rfcview:open-rfc-fallback', which opens the document in the user's
+browser and stops the search.  Signals an error when no candidate
+format yields a buffer or browser hand-off."
   (let* ((entry (and (hash-table-p (plist-get rfcview:rfc-cache :table))
                      (gethash number (plist-get rfcview:rfc-cache :table))))
          (formats (rfcview:read--format-order rfcview:preferred-format

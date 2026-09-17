@@ -155,15 +155,7 @@ create the cache from scratch."
   (rfcview:debug "parsing index buffer %S" buffer)
   (with-current-buffer buffer
     (goto-char (point-min))
-    (let ((last-modified
-           (save-excursion
-             (goto-char (point-min))
-             (unless (eq (point-min) (point-max))
-               (if (search-forward-regexp "^Last-Modified: " nil t)
-                   (date-to-time
-                    (buffer-substring (1+ (point))
-                                      (line-end-position)))))))
-          (rfc-table (make-hash-table :test 'equal))
+    (let ((rfc-table (make-hash-table :test 'equal))
           (continue t)
           entry)
       (while continue
@@ -172,36 +164,44 @@ create the cache from scratch."
           (if entry
               (puthash (plist-get entry :number) entry rfc-table)
             (setq continue nil))))
-      (list :last-modified last-modified :table rfc-table))))
+      (list :table rfc-table))))
 
 (defun rfcview:index-updated-p ()
-  "Check if rfc-index has been updated."
-  (with-current-buffer (rfcview:retrieve-index "HEAD")
-    (let ((last-modified
-           (progn
-             (goto-char (point-min))
-             (unless (eq (point-min) (point-max))
-               (if (search-forward-regexp "^Last-Modified: " nil t)
-                   (date-to-time
-                    (buffer-substring (1+ (point))
-                                      (line-end-position))))))))
-      (time-less-p (plist-get rfcview:rfc-cache :last-modified)
-                   last-modified))))
+  "Check if rfc-index has been updated.
+Compares the live index's opaque freshness token against the cached
+one by EQUALITY, not ordering — tokens may be an HTTP ETag/Last-
+Modified string or an rsync size+mtime token, neither of which
+supports `time-less-p'.
+
+Known, accepted limitation: an HTTP-shaped token never `equal's an
+rsync-shaped one even for an unchanged file.  This means the one call
+immediately after a rsync→HTTP fallback (see rfcview-transport.el)
+reports \"updated\" spuriously and triggers one avoidable full index
+refetch — harmless (the rebuilt table is still correct) and
+self-healing (the cache token matches the active backend's shape
+again afterward), so this is intentionally not special-cased."
+  (let ((result (rfcview:transport-fetch-index t)))
+    (and (plist-get result :found)
+         (not (equal (plist-get rfcview:rfc-cache :token)
+                     (plist-get result :token))))))
 
 (defun rfcview:update-index ()
   "Update RFC index cache if it is required."
   (message "Checking for RFC index update...")
   (when (rfcview:index-updated-p)
-    (with-current-buffer (rfcview:retrieve-index)
-      (let ((parsed (rfcview:parse-index-buffer (current-buffer))))
-        (setq rfcview:rfc-cache
-              (plist-put rfcview:rfc-cache :last-modified
-                         (plist-get parsed :last-modified)))
-        (setq rfcview:rfc-cache
-              (plist-put rfcview:rfc-cache :table
-                         (plist-get parsed :table))))
-      (rfcview:save-cache)
-      (kill-buffer (current-buffer)))))
+    (let ((result (rfcview:transport-fetch-index)))
+      (when (plist-get result :found)
+        (let ((buf (plist-get result :buffer)))
+          (unwind-protect
+              (let ((parsed (rfcview:parse-index-buffer buf)))
+                (setq rfcview:rfc-cache
+                      (plist-put rfcview:rfc-cache :token
+                                 (plist-get result :token)))
+                (setq rfcview:rfc-cache
+                      (plist-put rfcview:rfc-cache :table
+                                 (plist-get parsed :table))))
+            (when (buffer-live-p buf) (kill-buffer buf))))
+        (rfcview:save-cache)))))
 
 (defun rfcview:make-entry-line (number title date authors obsoletes obsoleted-by
                                        updates updated-by favorite)

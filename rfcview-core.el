@@ -6,16 +6,7 @@
 ;;; Code:
 
 (require 'url)
-
-(defcustom rfcview:rfc-base-url "http://www.ietf.org/rfc/"
-  "The base url of RFC"
-  :type 'string
-  :group 'rfcview)
-
-(defcustom rfcview:rfc-index-url (concat rfcview:rfc-base-url "rfc-index")
-  "The rfc index file url"
-  :type 'string
-  :group 'rfcview)
+(require 'rfcview-transport)
 
 (defcustom rfcview:local-directory (concat user-emacs-directory ".RFC/")
   "The location where to store downloaded RFC files."
@@ -43,14 +34,9 @@
   :type 'integer
   :group 'rfcview)
 
-(defcustom rfcview:retrieve-timeout 10
-  "The timeout to try retrieve rfc materials from server."
-  :type 'integer
-  :group 'rfcview)
-
 (defcustom rfcview:preferred-format 'txt
   "Preferred format for reading RFC documents.
-One of \\='txt, \\='pdf, \\='html, or \\='xml.
+One of \\='txt, \\='pdf, or \\='html.
 
 When the rfc-index `(Format: ...)' trailer lists this format, it is
 tried first and the remaining listed formats follow in canonical
@@ -61,13 +47,11 @@ formats are tried instead.  If nothing supported is listed (no
 is reported unavailable.
 
 `txt' and `pdf' are downloaded to `rfcview:local-directory' and opened
-in Emacs (PDF viewing requires pdf-tools).  `html' and `xml' are
-opened in the user's browser via `browse-url' and are not cached
-locally."
+in Emacs (PDF viewing requires pdf-tools).  `html' is opened in the
+user's browser via `browse-url' and is not cached locally."
   :type '(choice (const :tag "Plain text" txt)
                  (const :tag "PDF" pdf)
-                 (const :tag "HTML (browser)" html)
-                 (const :tag "XML (browser)" xml))
+                 (const :tag "HTML (browser)" html))
   :group 'rfcview)
 
 (defcustom rfcview:use-face t
@@ -256,7 +240,7 @@ RFC is opened from the index buffer.")
                       '("January" "February" "March" "April" "May" "June" "July"
                         "August" "September" "October" "November" "December"))))
 
-(defconst rfcview:rfc-cache-version 3
+(defconst rfcview:rfc-cache-version 4
   "Schema version of `rfcview:rfc-cache'.
 Bump when the on-disk layout changes incompatibly (new required
 keys, value-shape changes, etc.) OR when previously-cached `:table'
@@ -274,14 +258,19 @@ the same time: `rfcview:index-updated-p' compared an encoded
 (`date-to-time') and a decoded (`parse-time-string') time value, so a
 stale cache would almost never be detected as stale via
 `Last-Modified' alone — this version bump is what actually forces
-already-broken on-disk caches to rebuild.")
+already-broken on-disk caches to rebuild.
+
+Bumped 3 -> 4 because `:last-modified' (a comparable time value) was
+replaced by `:token' (an opaque, equality-only freshness token) to
+support both HTTP ETags and rsync size+mtime tokens, neither of which
+shares an ordering with the other or with a plain timestamp.")
 
 (defconst rfcview:rfc-cache-default
-  `(:version ,rfcview:rfc-cache-version :last-modified (-33750 55928)))
+  `(:version ,rfcview:rfc-cache-version :token nil))
 
 ;; Cache structure
-;; (:version 3
-;;  :last-modified lm-date
+;; (:version 4
+;;  :token freshness-token
 ;;  :table #s(hash-table
 ;;              size XXXX
 ;;              data (1 (:number 1
@@ -311,44 +300,6 @@ already-broken on-disk caches to rebuild.")
   (when rfcview:use-debug
     (apply #'message format args)))
 
-(defun rfcview:retrieve (url &optional method)
-  "A wrapper of url-retrieve-synchronously."
-  (let ((encoded-url (url-encode-url url))
-        (url-request-method (or method "GET")))
-    (with-current-buffer (url-retrieve-synchronously
-                          encoded-url t nil rfcview:retrieve-timeout)
-      (make-local-variable 'url-http-response-status)
-      (let ((process (ignore-errors (get-buffer-process (current-buffer)))))
-        (if (processp process)
-            (unless (process-live-p process)
-              (set-process-query-on-exit-flag process nil)
-              (delete-process process)
-              (error "HTTP error!"))
-          (set-buffer-multibyte t)      ; Fix latin chars get broken
-          (current-buffer))))))
-
-(defun rfcview:http-response-status (buffer)
-  "Return the HTTP status code from BUFFER as an integer, or nil."
-  (with-current-buffer buffer
-    (if (and (boundp 'url-http-response-status) url-http-response-status)
-        url-http-response-status
-      (save-excursion
-        (goto-char (point-min))
-        (when (re-search-forward "^HTTP/[0-9.]+ \\([0-9]+\\)" nil t)
-          (string-to-number (match-string 1)))))))
-
-(defun rfcview:retrieve-rfc (number &optional format)
-  "Retrieve RFC NUMBER from server. FORMAT is \\='txt (default) or \\='pdf."
-  (unless (numberp number)
-    (error "NUMBER argument is not numeric."))
-  (rfcview:retrieve
-   (concat rfcview:rfc-base-url
-           (format "rfc%d.%s" number (symbol-name (or format 'txt))))))
-
-(defun rfcview:retrieve-index (&optional method)
-  "Retrieve the RFC index from the server."
-  (rfcview:retrieve rfcview:rfc-index-url method))
-
 (defun rfcview:load-cache-internal (cache-file)
   "Load cache from a file."
   (when (file-exists-p cache-file)
@@ -367,11 +318,10 @@ per-version migration logic has a dispatch point — today every old
 version is migrated identically."
   (ignore old-version)
   (setq rfcview:rfc-cache
-        (list :version       rfcview:rfc-cache-version
-              :last-modified (plist-get rfcview:rfc-cache-default
-                                        :last-modified)
-              :favorite      (plist-get rfcview:rfc-cache :favorite)
-              :recent        (plist-get rfcview:rfc-cache :recent))))
+        (list :version  rfcview:rfc-cache-version
+              :token    (plist-get rfcview:rfc-cache-default :token)
+              :favorite (plist-get rfcview:rfc-cache :favorite)
+              :recent   (plist-get rfcview:rfc-cache :recent))))
 
 (defun rfcview:load-cache ()
   "Load cache from disk into `rfcview:rfc-cache'.

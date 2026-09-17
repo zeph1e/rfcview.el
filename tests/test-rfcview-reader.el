@@ -693,7 +693,7 @@ so nothing here previously exercised the unbounded [0-9]+ in the regexp."
   "Button help-echo is set to the RFC title from rfcview:rfc-cache."
   (let* ((tbl (make-hash-table :test 'equal))
          (_ (puthash 793 '(:title "Transmission Control Protocol") tbl))
-         (rfcview:rfc-cache (list :last-modified nil :table tbl)))
+         (rfcview:rfc-cache (list :token nil :table tbl)))
     (with-temp-buffer
       (insert "See [RFC793].\n")
       (rfcview:read-buttonize-refs)
@@ -1746,32 +1746,22 @@ matches via the `[A-Z(\"]' title-start class."
 
 ;;; ─── rfcview:download-rfc ────────────────────────────────────────────────────
 
-(ert-deftest rfcview:test-download-rfc-returns-nil-on-404 ()
-  "Returns nil when the server returns a 404 response."
-  (cl-letf (((symbol-function 'rfcview:retrieve-rfc)
-             (lambda (_num &optional _fmt)
-               (with-current-buffer (generate-new-buffer " *test-404*")
-                 (insert "HTTP/1.1 404 Not Found\r\n\r\n")
-                 (current-buffer))))
-            ((symbol-function 'rfcview:http-response-status) (lambda (_) 404))
-            ((symbol-function 'kill-buffer) #'ignore))
+(ert-deftest rfcview:test-download-rfc-returns-nil-when-not-found ()
+  "Returns nil when the transport reports the document as not found."
+  (cl-letf (((symbol-function 'rfcview:transport-fetch-rfc)
+             (lambda (_num _fmt) (list :found nil :buffer nil :token nil))))
     (should (null (rfcview:download-rfc 9999 'txt "/tmp/should-not-exist.txt")))))
 
-(ert-deftest rfcview:test-download-rfc-writes-file-and-returns-path-on-200 ()
-  "Writes the response body to TO-FILE and returns its path on HTTP 200.
-The mock response uses bare LF line endings because rfcview:download-rfc
-uses (re-search-forward \"^$\") to find the header/body separator, and
-that regex fails to match a line that contains only \\r (from CRLF)."
+(ert-deftest rfcview:test-download-rfc-writes-file-and-returns-path-on-found ()
+  "Writes the transport's body buffer to TO-FILE and returns its path."
   (let ((tmp (make-temp-file "rfcview-test-dl-")))
     (unwind-protect
-        (cl-letf (((symbol-function 'rfcview:retrieve-rfc)
-                   (lambda (_num &optional _fmt)
-                     (with-current-buffer (generate-new-buffer " *test-200*")
-                       (insert "HTTP/1.1 200 OK\n\n")
-                       (insert "RFC body content.\n")
-                       (current-buffer))))
-                  ((symbol-function 'rfcview:http-response-status) (lambda (_) 200))
-                  ((symbol-function 'kill-buffer) #'ignore))
+        (cl-letf (((symbol-function 'rfcview:transport-fetch-rfc)
+                   (lambda (_num _fmt)
+                     (let ((buf (generate-new-buffer " *test-body*")))
+                       (with-current-buffer buf
+                         (insert "RFC body content.\n"))
+                       (list :found t :buffer buf :token "etag-1")))))
           (let ((result (rfcview:download-rfc 793 'txt tmp)))
             (should (string= tmp result))
             (should (file-exists-p tmp))
@@ -1779,6 +1769,25 @@ that regex fails to match a line that contains only \\r (from CRLF)."
                               (insert-file-contents tmp)
                               (buffer-string))))
               (should (string-match-p "RFC body content" contents)))))
+      (ignore-errors (delete-file tmp)))))
+
+(ert-deftest rfcview:test-download-rfc-writes-pdf-with-binary-coding ()
+  "PDF downloads are written with `coding-system-for-write' bound to
+`binary', so raw bytes round-trip without re-encoding."
+  (let ((tmp (make-temp-file "rfcview-test-dl-"))
+        captured-coding)
+    (unwind-protect
+        (cl-letf (((symbol-function 'rfcview:transport-fetch-rfc)
+                   (lambda (_num _fmt)
+                     (let ((buf (generate-new-buffer " *test-pdf-body*")))
+                       (with-current-buffer buf
+                         (insert "%PDF-1.4 fake body"))
+                       (list :found t :buffer buf :token nil))))
+                  ((symbol-function 'write-region)
+                   (lambda (&rest _args)
+                     (setq captured-coding coding-system-for-write))))
+          (rfcview:download-rfc 793 'pdf tmp)
+          (should (eq captured-coding 'binary)))
       (ignore-errors (delete-file tmp)))))
 
 ;;; ─── rfcview:read-rfc ────────────────────────────────────────────────────────
@@ -1874,7 +1883,7 @@ that regex fails to match a line that contains only \\r (from CRLF)."
                (lambda (url &rest _) (setq browsed url))))
       (rfcview:read-rfc 9999 "3.2")
       (should browsed)
-      (should (string-match-p "rfc9999\\.html" browsed)))))
+      (should (string= "https://www.rfc-editor.org/info/rfc9999/" browsed)))))
 
 ;;; ─── rfcview:read-buffer-name ───────────────────────────────────────────────
 
@@ -2349,8 +2358,7 @@ that broke in real read-mode buffers."
   "Preferred leads the result when it appears in AVAILABLE."
   (should (equal '(txt pdf)  (rfcview:read--format-order 'txt  '("TXT" "PDF"))))
   (should (equal '(pdf txt)  (rfcview:read--format-order 'pdf  '("TXT" "PDF"))))
-  (should (equal '(html)     (rfcview:read--format-order 'html '("HTML"))))
-  (should (equal '(xml)      (rfcview:read--format-order 'xml  '("XML")))))
+  (should (equal '(html)     (rfcview:read--format-order 'html '("HTML")))))
 
 (ert-deftest rfcview:test-read-format-order-preferred-dropped-when-not-listed ()
   "Preferred is dropped when the index does not advertise it."
@@ -2363,7 +2371,6 @@ that broke in real read-mode buffers."
   (should (null (rfcview:read--format-order 'txt  nil)))
   (should (null (rfcview:read--format-order 'pdf  nil)))
   (should (null (rfcview:read--format-order 'html nil)))
-  (should (null (rfcview:read--format-order 'xml  nil)))
   (should (null (rfcview:read--format-order 'txt  '("PS" "EPUB")))))
 
 (ert-deftest rfcview:test-read-format-order-no-duplicate-preferred ()
@@ -2380,6 +2387,14 @@ that broke in real read-mode buffers."
 (ert-deftest rfcview:test-read-format-order-unsupported-tokens-filtered ()
   "Tokens outside `rfcview:supported-formats' (PS, EPUB, …) are dropped."
   (should (equal '(txt) (rfcview:read--format-order 'txt '("TXT" "PS" "EPUB")))))
+
+(ert-deftest rfcview:test-read-format-order-deprecated-preferred-not-selected ()
+  "A PREFERRED value no longer in `rfcview:supported-formats' (e.g. a
+stale `xml' setting from before this package dropped it) is not
+unconditionally selected even when AVAILABLE still advertises it —
+every supported format is tried in canonical order instead."
+  (should (null (rfcview:read--format-order 'xml '("XML"))))
+  (should (equal '(txt) (rfcview:read--format-order 'xml '("TXT" "XML")))))
 
 ;;; ─── rfcview:read-jump-to-section ───────────────────────────────────────────
 

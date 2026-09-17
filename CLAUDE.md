@@ -4,16 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-`rfcview.el` is a four-file Emacs package (Elisp) for browsing, downloading, and reading IETF RFC documents inside Emacs. There are no build steps and no external dependencies beyond Emacs's built-in `url` library. An ERT-based test suite lives under `tests/`.
+`rfcview.el` is a five-file Emacs package (Elisp) for browsing, downloading, and reading IETF RFC documents inside Emacs. There are no build steps. By default it depends only on Emacs's built-in `url` library; selecting the `'rsync` transport (`rfcview:transport-method`) additionally depends on a system `rsync` binary, with automatic fallback to HTTP if rsync fails for an infrastructure reason. An ERT-based test suite lives under `tests/`.
 
 ## Development
 
 Byte-compile all files to catch errors and warnings:
 ```
-emacs -Q --batch -L . -f batch-byte-compile rfcview-core.el rfcview-index.el rfcview-reader.el rfcview.el
+emacs -Q --batch -L . -f batch-byte-compile rfcview-transport.el rfcview-core.el rfcview-index.el rfcview-reader.el rfcview.el
 ```
 
-Load interactively for testing (all four files must be on the load path):
+Load interactively for testing (all five files must be on the load path):
 ```emacs-lisp
 (add-to-list 'load-path "/path/to/rfcview.el")
 (require 'rfcview)
@@ -47,31 +47,41 @@ Tests are named `rfcview:test-…`. `tests/run-tests.el` uses `ert-run-tests-bat
 
 ## Architecture
 
-The package is split across four files with a strict one-way dependency chain:
+The package is split across five files with a strict one-way dependency chain:
 
 ```
-rfcview-core.el  ←  rfcview-index.el  ←┐
-      ↑                                  rfcview.el (entry point)
-      └──────────  rfcview-reader.el  ←┘
+rfcview-transport.el  ←  rfcview-core.el  ←  rfcview-index.el  ←┐
+                                ↑                                  rfcview.el (entry point)
+                                └──────────  rfcview-reader.el  ←┘
 ```
 
-`rfcview-index.el` and `rfcview-reader.el` each `require` only `rfcview-core`. They call each other's functions at runtime (`rfcview:index-goto-number` from reader, `rfcview:read-rfc` from index), but those calls are resolved dynamically — by the time any interactive command runs, `rfcview.el` has already loaded both files.
+`rfcview-transport.el` is required only by `rfcview-core.el` and must not require it (or any other rfcview file) back — that is the base of the chain. `rfcview-index.el` and `rfcview-reader.el` each `require` only `rfcview-core`. They call each other's functions at runtime (`rfcview:index-goto-number` from reader, `rfcview:read-rfc` from index), but those calls are resolved dynamically — by the time any interactive command runs, `rfcview.el` has already loaded both files.
 
-### rfcview-core.el — shared data, faces, and network
+### rfcview-transport.el — network backends
 
-All `defcustom` declarations (group `rfcview`) and most `defface` definitions live here, along with the shared `rfcview:rfc-link-button` button type. Core also holds the cache variable `rfcview:rfc-cache` (a plist with `:version`, `:last-modified`, `:table` hash-table keyed by RFC number, `:favorite`, and `:recent`), network functions (`rfcview:retrieve`, `rfcview:retrieve-rfc`, `rfcview:retrieve-index`), cache persistence (`rfcview:load-cache` / `rfcview:save-cache`), and the text-wrapping utility `rfcview:wrap-text-at-word-boundary`.
+Holds everything network-related that used to live in core: the HTTP primitives `rfcview:retrieve`/`rfcview:http-response-status` (still used as-is by the Google-Translate helpers in `rfcview-core.el`, which `require`s this file), `rfcview:rfc-base-url`/`rfcview:rfc-index-url`, and the HTTP-vs-rsync transport abstraction.
 
-The cache is versioned: `rfcview:rfc-cache-version` (currently `3`) is stored under the `:version` key. On load, a mismatched version is handed to `rfcview:update-cache`, which preserves `:favorite` and `:recent` and resets everything else so the next index refresh rebuilds it. Bump the constant whenever the on-disk layout changes incompatibly. Per-entry plists in `:table` carry `:number`, `:title`, `:authors`, `:format` (list of strings like `"TXT"`, `"PDF"`), `:date`, optional `:status`, and trait lists (`:obsoletes`, `:obsoleted-by`, `:updated-by`, etc.).
+`rfcview:transport-method` (`'http`, the default, or `'rsync`) picks the backend. The two public entry points, `rfcview:transport-fetch-rfc` and `rfcview:transport-fetch-index`, both return a normalized result plist: `:found` (t or nil), `:buffer` (body content only, headers/rsync protocol already stripped — nil for a metadata-only index check), and `:token` (an opaque freshness marker — an HTTP ETag/Last-Modified string, or an rsync size+mtime string — compared only with `equal`, never ordered, since an ETag has no ordering and there is no shared ordering between an ETag and an rsync mtime). Backends are registered in the `rfcview:transport-backends` alist (a `defvar`, not a `defcustom` — a code-level extension point) and dispatched by `rfcview:transport--dispatch`, which retries once against the `http` entry when the `rsync` backend signals `rfcview:transport-infra-error` (binary missing, connection/timeout, protocol error). A genuine "not found" from rsync (the daemon says the file doesn't exist) is returned as-is with no HTTP retry — same semantics as an HTTP 404.
+
+The rsync backend fetches from `rfcview:rsync-server-host` (`rsync.rfc-editor.org`), using `rfcview:rsync-module-text`/`rfcview:rsync-module-pdf` for `.txt`/`.txt.pdf` files. A metadata-only request omits the destination argument, which the daemon answers with a one-line listing (size + mtime, no content transfer) parsed into the `:token`. A full fetch downloads to a temp file with `--times` (so the local mtime matches the remote one) and derives the same token from that file's attributes — the two are numerically identical for an unchanged file, which is what lets `rfcview:index-updated-p`'s equality check work correctly across a metadata check and a prior full fetch.
+
+Known, accepted limitation: an HTTP-shaped token (an ETag/Last-Modified string) never `equal`s an rsync-shaped one (a size+mtime string), even for the exact same, unchanged file. So the one `rfcview:index-updated-p` call right after a rsync→HTTP fallback reports "updated" spuriously and triggers one avoidable full index refetch. This is harmless (the rebuilt table is still correct) and self-healing (the cached token matches the active backend's shape again immediately afterward), so it is intentionally not special-cased — see the doc-string on `rfcview:index-updated-p` in rfcview-index.el.
+
+### rfcview-core.el — shared data and faces
+
+All `defcustom` declarations not owned by `rfcview-transport.el` (group `rfcview`) and most `defface` definitions live here, along with the shared `rfcview:rfc-link-button` button type. Core also holds the cache variable `rfcview:rfc-cache` (a plist with `:version`, `:token`, `:table` hash-table keyed by RFC number, `:favorite`, and `:recent`), cache persistence (`rfcview:load-cache` / `rfcview:save-cache`), and the text-wrapping utility `rfcview:wrap-text-at-word-boundary`.
+
+The cache is versioned: `rfcview:rfc-cache-version` (currently `4`) is stored under the `:version` key. On load, a mismatched version is handed to `rfcview:update-cache`, which preserves `:favorite` and `:recent` and resets everything else so the next index refresh rebuilds it. Bump the constant whenever the on-disk layout changes incompatibly. Per-entry plists in `:table` carry `:number`, `:title`, `:authors`, `:format` (list of strings like `"TXT"`, `"PDF"`), `:date`, optional `:status`, and trait lists (`:obsoletes`, `:obsoleted-by`, `:updated-by`, etc.).
 
 Note: `rfcview:read-rfc-header-face`, `rfcview:read-rfc-title-face`, and `rfcview:read-rfc-section-face` are defined in `rfcview-reader.el`, not here — they are reader-specific and not needed in the index.
 
-`rfcview:preferred-format` (one of `'txt`, `'pdf`, `'html`, `'xml`) is the user's preferred format for opening an RFC. The actual try-order is computed by `rfcview:read--format-order` from the cached `:format` list of each entry — only formats the rfc-index advertises are tried, and if `preferred-format` is not listed it is dropped (index is authoritative). `txt`/`pdf` are downloaded and opened in Emacs; `html`/`xml` are handed to `browse-url` and are not cached locally.
+`rfcview:preferred-format` (one of `'txt`, `'pdf`, or `'html`) is the user's preferred format for opening an RFC. The actual try-order is computed by `rfcview:read--format-order` from the cached `:format` list of each entry — only formats the rfc-index advertises are tried, and if `preferred-format` is not listed (or is a stale value no longer in `rfcview:supported-formats`, e.g. `'xml` from before it was dropped) it is dropped (index is authoritative). `txt`/`pdf` are downloaded and opened in Emacs; `html` is handed to `browse-url` (at the RFC Editor's `/info/rfcN/` page, not a `rfc-base-url`-derived path) and is not cached locally.
 
 `rfcview:wrap-text-at-word-boundary` is used only for the filter line in the index (which has mixed propertized strings). Entry text is laid out using Emacs's `word-wrap` mode with `wrap-prefix` text properties instead.
 
 ### rfcview-index.el — index mode
 
-**Parsing** — `rfcview:parse-index-entry` / `rfcview:parse-index-buffer` parse the raw IETF rfc-index text into the hash-table stored in `rfcview:rfc-cache`. `rfcview:update-index` orchestrates update: it sends a HEAD request via `rfcview:index-updated-p` and only fetches the full index when `Last-Modified` has advanced.
+**Parsing** — `rfcview:parse-index-entry` / `rfcview:parse-index-buffer` parse the raw IETF rfc-index text into the hash-table stored in `rfcview:rfc-cache`. `rfcview:update-index` orchestrates update: it does a metadata-only check via `rfcview:index-updated-p` and only fetches the full index when the live freshness token differs from the cached one (see rfcview-transport.el above).
 
 **Index mode** (`*RFC INDEX*` buffer, `rfcview:index-mode`) — a read-only buffer rendered by `rfcview:refresh-index`. Each entry is built by `rfcview:make-entry-line` and inserted by `rfcview:insert-with-text-properties`, which also creates clickable buttons for RFC cross-references within traits. Entry navigation uses `rfcview:number` text properties and `paragraph` boundaries. A filter line at the top provides buttons for All / Favorites / Recents / keyword search. The current entry is highlighted with `rfcview:background-highlight-overlay`. `?` opens `rfcview:index-show-help`.
 
@@ -93,7 +103,7 @@ The selected entry's highlight uses three coordinated mechanisms:
 
 ### rfcview-reader.el — RFC document read mode
 
-**Read mode** (`*RFC XXXX*` buffer, `rfcview:read-mode`) — `txt`/`pdf` RFCs are downloaded once and cached locally under `rfcview:local-directory` (`~/.emacs.d/.RFC/`); `html`/`xml` are handed to `browse-url` and not cached. Format selection is driven by `rfcview:read--format-order`, which returns the intersection of `rfcview:supported-formats` and the entry's cached `:format` list (preferred first when listed; preferred dropped when not listed; nil when nothing supported is listed). `rfcview:download-rfc` handles a single locally-cached format and returns `nil` on 404. `rfcview:read-rfc` dispatches each candidate via the `rfcview:open-rfc-functions` alist (`txt → rfcview:open-rfc-txt`, `pdf → rfcview:open-rfc-pdf`); a missing/nil entry falls through to `rfcview:open-rfc-fallback`, which calls `browse-url` and ends the search.
+**Read mode** (`*RFC XXXX*` buffer, `rfcview:read-mode`) — `txt`/`pdf` RFCs are downloaded once and cached locally under `rfcview:local-directory` (`~/.emacs.d/.RFC/`); `html` is handed to `browse-url` and not cached. Format selection is driven by `rfcview:read--format-order`, which returns the intersection of `rfcview:supported-formats` (`txt`, `pdf`, `html` — `xml` was dropped once the RFC Editor's per-document xml URL stopped working) and the entry's cached `:format` list (preferred first when listed and itself supported; preferred dropped when not listed or no longer supported; nil when nothing supported is listed). `rfcview:download-rfc` fetches via `rfcview:transport-fetch-rfc` and returns `nil` when the transport reports the document not found. `rfcview:read-rfc` dispatches each candidate via the `rfcview:open-rfc-functions` alist (`txt → rfcview:open-rfc-txt`, `pdf → rfcview:open-rfc-pdf`); a missing/nil entry falls through to `rfcview:open-rfc-fallback`, which calls `browse-url` on the RFC Editor's `/info/rfcN/` page and ends the search.
 
 Reader buffer names (`*RFC NNNN*`) and locally-cached filenames (`rfcNNNN.txt`/`.pdf` under `rfcview:local-directory`) are unpadded — built via `rfcview:read-buffer-name` and, for the cache path, `rfcview:read--local-file-path`. Older versions of rfcview zero-padded RFC numbers below 1000 in the cache filename (e.g. `rfc0042.txt`); `rfcview:read--local-file-path` checks the current unpadded path first, and if missing, falls back to that legacy zero-padded path — if found, it is used for the open and `copy-file`d forward to the unpadded name (the legacy file is left in place, not renamed, so the original download is never at risk). RFC numbers ≥1000 have no legacy form to recover (zero-padding to 4 digits was already a no-op for them).
 

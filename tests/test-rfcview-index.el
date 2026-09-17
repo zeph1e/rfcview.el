@@ -9,7 +9,7 @@
 
 (defun rfcview-test:make-cache (&optional table favorite recent)
   "Return a minimal rfcview:rfc-cache plist."
-  (list :last-modified '(0 0)
+  (list :token "test-token"
         :table (or table (make-hash-table :test 'equal))
         :favorite favorite
         :recent recent))
@@ -330,42 +330,46 @@ even though it comes first in the file."
 
 ;;; ─── rfcview:index-updated-p ─────────────────────────────────────────────────
 
-(defun rfcview-test:make-head-response-buffer (last-modified-header)
-  "Return a temp buffer shaped like a HEAD response with LAST-MODIFIED-HEADER."
-  (let ((buf (generate-new-buffer " *rfcview-test-head*")))
-    (with-current-buffer buf
-      (insert (format "HTTP/1.1 200 OK\r\nLast-Modified: %s\r\n\r\n"
-                      last-modified-header)))
-    buf))
+(ert-deftest rfcview:test-index-updated-p-true-when-token-differs ()
+  "Returns non-nil when the live index's token differs from the cached one.
+Regression guard: the old Last-Modified comparison used to be silently
+broken because the fetched header was parsed with parse-time-string (a
+decoded time list) while the cached value used date-to-time (an encoded
+time) -- time-less-p couldn't meaningfully compare the two.  The token
+comparison is equality-only, so this class of bug cannot recur."
+  (let ((rfcview:rfc-cache (list :token "etag-old")))
+    (cl-letf (((symbol-function 'rfcview:transport-fetch-index)
+               (lambda (&optional _metadata-only)
+                 (list :found t :buffer nil :token "etag-new"))))
+      (should (rfcview:index-updated-p)))))
 
-(ert-deftest rfcview:test-index-updated-p-true-when-newer ()
-  "Returns non-nil when the live index's Last-Modified is newer than cache.
-Regression guard: this comparison used to be silently broken because the
-fetched header was parsed with parse-time-string (a decoded time list)
-while the cached value uses date-to-time (an encoded time) -- time-less-p
-can't meaningfully compare the two, so the check almost always returned nil
-regardless of the real dates."
-  (let ((rfcview:rfc-cache
-         (list :last-modified (date-to-time "Tue, 01 Jan 2019 12:00:00 GMT")))
-        (buf (rfcview-test:make-head-response-buffer
-              "Wed, 01 Jul 2026 12:00:00 GMT")))
-    (unwind-protect
-        (cl-letf (((symbol-function 'rfcview:retrieve-index)
-                   (lambda (&optional _method) buf)))
-          (should (rfcview:index-updated-p)))
-      (kill-buffer buf))))
+(ert-deftest rfcview:test-index-updated-p-false-when-token-same ()
+  "Returns nil when the live index's token matches the cached one."
+  (let ((rfcview:rfc-cache (list :token "etag-current")))
+    (cl-letf (((symbol-function 'rfcview:transport-fetch-index)
+               (lambda (&optional _metadata-only)
+                 (list :found t :buffer nil :token "etag-current"))))
+      (should-not (rfcview:index-updated-p)))))
 
-(ert-deftest rfcview:test-index-updated-p-false-when-not-newer ()
-  "Returns nil when the live index's Last-Modified is not newer than cache."
-  (let ((rfcview:rfc-cache
-         (list :last-modified (date-to-time "Wed, 01 Jul 2026 12:00:00 GMT")))
-        (buf (rfcview-test:make-head-response-buffer
-              "Tue, 01 Jan 2019 12:00:00 GMT")))
-    (unwind-protect
-        (cl-letf (((symbol-function 'rfcview:retrieve-index)
-                   (lambda (&optional _method) buf)))
-          (should-not (rfcview:index-updated-p)))
-      (kill-buffer buf))))
+(ert-deftest rfcview:test-index-updated-p-false-when-not-found ()
+  "Returns nil when the transport reports the index as not found.
+A transient not-found should not be treated as \"changed\"."
+  (let ((rfcview:rfc-cache (list :token "etag-current")))
+    (cl-letf (((symbol-function 'rfcview:transport-fetch-index)
+               (lambda (&optional _metadata-only)
+                 (list :found nil :buffer nil :token nil))))
+      (should-not (rfcview:index-updated-p)))))
+
+(ert-deftest rfcview:test-index-updated-p-passes-metadata-only ()
+  "Calls rfcview:transport-fetch-index with METADATA-ONLY non-nil."
+  (let ((rfcview:rfc-cache (list :token "etag-current"))
+        captured)
+    (cl-letf (((symbol-function 'rfcview:transport-fetch-index)
+               (lambda (&optional metadata-only)
+                 (setq captured metadata-only)
+                 (list :found t :buffer nil :token "etag-current"))))
+      (rfcview:index-updated-p)
+      (should captured))))
 
 ;;; ─── rfcview:get-filter-name ─────────────────────────────────────────────────
 

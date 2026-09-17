@@ -8,6 +8,7 @@
 
 (require 'ert)
 
+(load (expand-file-name "test-rfcview-transport.el" (file-name-directory load-file-name)))
 (load (expand-file-name "test-rfcview-core.el"   (file-name-directory load-file-name)))
 (load (expand-file-name "test-rfcview-index.el"  (file-name-directory load-file-name)))
 (load (expand-file-name "test-rfcview-reader.el" (file-name-directory load-file-name)))
