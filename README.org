@@ -16,7 +16,7 @@
 - Browse the full up-to-date IETF RFC index with fancy and informative look.
 - Filter by favorites, recently read, or keyword search (scored and ranked)
 - Automatically download and display RFCs on demand.
-- Multi-format support driven by the rfc-index: TXT and PDF render inside Emacs (PDF requires pdf-tools); HTML and XML open in the browser via =browse-url=
+- Multi-format support driven by the rfc-index: TXT and PDF render inside Emacs (PDF requires pdf-tools); HTML opens in the browser via =browse-url=
 - Rich read mode:
   - Applying style to RFC document
   - Jump by section
@@ -46,7 +46,7 @@
 
 ** Manual
 
-Place all four =.el= files (=rfcview.el=, =rfcview-core.el=, =rfcview-index.el=, =rfcview-reader.el=) in the same directory and add:
+Place all five =.el= files (=rfcview.el=, =rfcview-core.el=, =rfcview-index.el=, =rfcview-reader.el=, =rfcview-transport.el=) in the same directory and add:
 
 #+BEGIN_SRC emacs-lisp
 ;; e.g. if placed in ~/.emacs.d/rfcview/
@@ -97,20 +97,19 @@ In an RFC read buffer:
 
 * Reading formats
 
-rfcview reads the =(Format: ...)= trailer of each entry in the rfc-index and only tries formats the index advertises. The four supported values for =rfcview:preferred-format= are:
+rfcview reads the =(Format: ...)= trailer of each entry in the rfc-index and only tries formats the index advertises. The three supported values for =rfcview:preferred-format= are:
 
 | Value   | Where it opens                                  | Cached locally? |
 |---------+-------------------------------------------------+-----------------|
 | =txt=   | Emacs read mode (default)                       | yes             |
 | =pdf=   | Emacs =pdf-view-mode= (requires pdf-tools)      | yes             |
-| =html=  | External browser via =browse-url=               | no              |
-| =xml=   | External browser via =browse-url=               | no              |
+| =html=  | External browser, at the RFC Editor's info page | no              |
 
 ** Selection rules
 
-When the index lists =rfcview:preferred-format=, it leads; the remaining listed supported formats follow as fallback (so a broken =txt= link can still resolve to =pdf= if the index lists both). When the index does *not* list the preferred format, it is dropped — the index is authoritative — and the listed supported formats are tried instead. If nothing supported is listed, rfcview reports the RFC as unavailable.
+When the index lists =rfcview:preferred-format=, it leads; the remaining listed supported formats follow as fallback (so a broken =txt= link can still resolve to =pdf= if the index lists both). When the index does *not* list the preferred format, or the preferred format is no longer supported, it is dropped — the index is authoritative — and the listed supported formats are tried instead. If nothing supported is listed, rfcview reports the RFC as unavailable.
 
-Some RFCs only present as PDF (e.g. RFC 8); rfcview picks up the index's =(Format: PDF=...)= and opens the PDF directly. Likewise for HTML/XML-only entries.
+Some RFCs only present as PDF (e.g. RFC 8); rfcview picks up the index's =(Format: PDF=...)= and opens the PDF directly. Likewise for HTML-only entries.
 
 ** PDF support
 
@@ -130,8 +129,27 @@ Viewing PDFs requires [[https://github.com/vedang/pdf-tools][pdf-tools]]. rfcvie
   (use-package rfcview
     :vc (:url "https://github.com/zeph1e/rfcview.el" :rev :newest)
     :commands rfcview
-    :custom (rfcview:preferred-format 'pdf))   ; or 'txt, 'html, 'xml
+    :custom (rfcview:preferred-format 'pdf))   ; or 'txt, 'html
 #+END_SRC
+
+* Transport
+
+RFCs and the rfc-index are fetched over HTTP by default. rfcview can
+also fetch them via rsync against the RFC Editor's rsync server
+(rsync.rfc-editor.org), as an alternative transport.
+
+#+BEGIN_SRC emacs-lisp
+  (use-package rfcview
+    :vc (:url "https://github.com/zeph1e/rfcview.el" :rev :newest)
+    :commands rfcview
+    :custom (rfcview:transport-method 'rsync))   ; or 'http (default)
+#+END_SRC
+
+Using rsync requires a system =rsync= binary. If an rsync attempt
+fails for an infrastructure reason, such as a missing binary or a
+connection problem, rfcview automatically retries over HTTP for that
+request. A genuine file-not-found is not retried. It is reported the
+same way a 404 is under HTTP.
 
 * Translation
 

@@ -5,7 +5,7 @@
 ;; Author: Yunsik Jang <doomsday@kldp.org>
 ;; Homepage: http://github.com/zeph1e/rfcview.el
 ;; Created: 5 Oct 2016
-;; Version: 2.0
+;; Version: 2.1
 ;; Keywords: docs
 ;; License: WTFPL (http://sam.zoy.org/wtfpl)
 ;;
@@ -15,6 +15,24 @@
 ;;; Commentary:
 
 ;;; Change Log:
+;;
+;;  2.1 - 18 Sep 2026 - fix rfc-index URL, add rsync transport
+;;
+;;   - the RFC Editor moved the rfc-index URL; `rfcview:rfc-index-url'
+;;     now points at the working address.
+;;   - new optional transport: `rfcview:transport-method' can be set
+;;     to `rsync' to fetch RFCs and the index via rsync against the
+;;     RFC Editor's rsync server, instead of HTTP (still the default).
+;;     A failed rsync attempt retries over HTTP automatically, unless
+;;     the file is genuinely not found.
+;;   - network code moved into a new `rfcview-transport.el'; the
+;;     package is now five files.
+;;   - the cache freshness check now compares an opaque token (an
+;;     HTTP ETag or an rsync size and modification time) instead of a
+;;     `Last-Modified' timestamp; on-disk cache schema bumped.
+;;   - dropped `xml' as a supported format; its RFC Editor URL no
+;;     longer works. The `html' fallback now opens the RFC Editor's
+;;     info page for the document.
 ;;
 ;;  2.0 - 28 Jul 2026 - Google Translate overlays, RFC-number & cache fixes
 ;;
